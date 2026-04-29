@@ -9,6 +9,7 @@
     "dev:client": "vite --port=3004 --host=0.0.0.0",
     "dev:api": "tsx server.ts",
     "build": "vite build",
+    "postinstall": "vite build",
     "preview": "vite preview --port=3004 --host=0.0.0.0",
     "start": "node server.js",
     "lint": "tsc --noEmit"
