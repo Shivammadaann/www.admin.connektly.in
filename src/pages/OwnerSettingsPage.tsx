@@ -4,52 +4,51 @@ import {
   Bell,
   Building2,
   Camera,
-  Check,
-  CreditCard,
   Globe2,
   Loader2,
   LockKeyhole,
   Mail,
-  Palette,
   Phone,
   RefreshCcw,
   Save,
+  Send,
   ShieldCheck,
-  SlidersHorizontal,
-  Upload,
+  Trash2,
   User,
   Users,
+  XCircle,
 } from 'lucide-react';
 import { adminApi } from '../lib/adminApi';
-import type { OwnerSettingsResponse } from '../lib/types';
+import type { AdminPermissionKey, AdminUserRow, DashboardAdminUsersResponse, OwnerSettingsResponse } from '../lib/types';
 import { formatDateTime, getInitials, labelize } from '../lib/format';
 import Panel from '../components/Panel';
 import StatusBadge from '../components/StatusBadge';
 
 type OwnerProfile = OwnerSettingsResponse['profile'];
 type OwnerForm = Omit<OwnerProfile, 'adminUserId' | 'loginEmail' | 'avatarUrl' | 'updatedAt'>;
+type AdminInviteForm = {
+  email: string;
+  fullName: string;
+  roleTitle: string;
+  permissions: AdminPermissionKey[];
+};
 type TabId =
   | 'profile'
   | 'organization'
-  | 'customization'
   | 'security'
   | 'users'
-  | 'notifications'
-  | 'subscription';
+  | 'notifications';
 
 const tabs: Array<{ id: TabId; label: string; Icon: typeof User }> = [
   { id: 'profile', label: 'Profile Management', Icon: User },
   { id: 'organization', label: 'Organization Management', Icon: Globe2 },
-  { id: 'customization', label: 'Dashboard Customization', Icon: SlidersHorizontal },
   { id: 'security', label: 'Security', Icon: ShieldCheck },
   { id: 'users', label: 'User Management', Icon: Users },
   { id: 'notifications', label: 'Notifications', Icon: Bell },
-  { id: 'subscription', label: 'Subscription', Icon: CreditCard },
 ];
 
-const accentOptions = ['#5b45ff', '#2563eb', '#0891b2', '#059669', '#ea580c', '#dc2626'];
-
 const timezones = ['Asia/Kolkata', 'UTC', 'Asia/Dubai', 'Europe/London', 'America/New_York', 'America/Los_Angeles'];
+const defaultInvitePermissions: AdminPermissionKey[] = ['command_center'];
 
 const inputClass =
   'w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-950 outline-none transition focus:border-[#5b45ff] focus:ring-1 focus:ring-[#5b45ff]';
@@ -106,9 +105,19 @@ function ToggleRow({
 export default function OwnerSettingsPage() {
   const [settings, setSettings] = useState<OwnerSettingsResponse | null>(null);
   const [form, setForm] = useState<OwnerForm | null>(null);
+  const [adminUsers, setAdminUsers] = useState<DashboardAdminUsersResponse | null>(null);
+  const [organizationUsers, setOrganizationUsers] = useState<AdminUserRow[]>([]);
+  const [inviteForm, setInviteForm] = useState<AdminInviteForm>({
+    email: '',
+    fullName: '',
+    roleTitle: 'Admin',
+    permissions: defaultInvitePermissions,
+  });
+  const [accountForm, setAccountForm] = useState({ loginEmail: '', newPassword: '', confirmPassword: '' });
   const [activeTab, setActiveTab] = useState<TabId>('profile');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [adminActionId, setAdminActionId] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -120,8 +129,20 @@ export default function OwnerSettingsPage() {
       const response = await adminApi.getOwnerSettings();
       setSettings(response);
       setForm(formFromProfile(response.profile));
+      setAccountForm({ loginEmail: response.profile.loginEmail || '', newPassword: '', confirmPassword: '' });
+      if (response.access.canManageAdmins) {
+        const [admins, usersResponse] = await Promise.all([
+          adminApi.getDashboardAdmins(),
+          adminApi.getUsers().catch(() => ({ users: [] as AdminUserRow[], generatedAt: '' })),
+        ]);
+        setAdminUsers(admins);
+        setOrganizationUsers(usersResponse.users.filter((user) => Boolean(user.email)));
+      } else {
+        setAdminUsers(null);
+        setOrganizationUsers([]);
+      }
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to load owner settings.');
+      setError(error instanceof Error ? error.message : 'Failed to load admin settings.');
     } finally {
       setIsLoading(false);
     }
@@ -138,7 +159,7 @@ export default function OwnerSettingsPage() {
     )}`;
   }, [settings]);
 
-  const saveSettings = async (payload: Partial<OwnerProfile>, successMessage = 'Owner settings saved.') => {
+  const saveSettings = async (payload: Partial<OwnerProfile>, successMessage = 'Admin settings saved.') => {
     try {
       setIsSaving(true);
       setError(null);
@@ -149,7 +170,7 @@ export default function OwnerSettingsPage() {
       publishOwnerProfile(response.profile);
       setNotice(response.warning || successMessage);
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to save owner settings.');
+      setError(error instanceof Error ? error.message : 'Failed to save admin settings.');
     } finally {
       setIsSaving(false);
     }
@@ -188,6 +209,134 @@ export default function OwnerSettingsPage() {
     }
   };
 
+  const toggleInvitePermission = (permission: AdminPermissionKey, checked: boolean) => {
+    setInviteForm((current) => {
+      const next = checked ? [...new Set([...current.permissions, permission])] : current.permissions.filter((item) => item !== permission);
+      return { ...current, permissions: next };
+    });
+  };
+
+  const toggleAdminPermission = (adminId: string, permission: AdminPermissionKey, checked: boolean) => {
+    setAdminUsers((current) =>
+      current
+        ? {
+            ...current,
+            admins: current.admins.map((admin) =>
+              admin.id === adminId
+                ? {
+                    ...admin,
+                    permissions: checked
+                      ? [...new Set([...admin.permissions, permission])]
+                      : admin.permissions.filter((item) => item !== permission),
+                  }
+                : admin,
+            ),
+          }
+        : current,
+    );
+  };
+
+  const saveAccount = async () => {
+    if (!accountForm.loginEmail) {
+      setError('Login email is required.');
+      return;
+    }
+    if (accountForm.newPassword || accountForm.confirmPassword) {
+      if (accountForm.newPassword !== accountForm.confirmPassword) {
+        setError('New password and confirmation do not match.');
+        return;
+      }
+      if (accountForm.newPassword.length < 8) {
+        setError('Password must be at least 8 characters.');
+        return;
+      }
+    }
+
+    try {
+      setIsSaving(true);
+      setError(null);
+      setNotice(null);
+      const response = await adminApi.updateOwnerAccount({
+        loginEmail: accountForm.loginEmail,
+        newPassword: accountForm.newPassword || undefined,
+      });
+      setSettings(response);
+      setForm(formFromProfile(response.profile));
+      setAccountForm({ loginEmail: response.profile.loginEmail || accountForm.loginEmail, newPassword: '', confirmPassword: '' });
+      publishOwnerProfile(response.profile);
+      setNotice('Login credentials updated.');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to update login credentials.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const inviteAdmin = async () => {
+    try {
+      setAdminActionId('invite');
+      setError(null);
+      setNotice(null);
+      const response = await adminApi.inviteDashboardAdmin(inviteForm);
+      setAdminUsers(response);
+      setInviteForm({ email: '', fullName: '', roleTitle: 'Admin', permissions: defaultInvitePermissions });
+      setNotice(response.warning || 'Dashboard admin invited.');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to invite dashboard admin.');
+    } finally {
+      setAdminActionId(null);
+    }
+  };
+
+  const useOrganizationUserForInvite = (userId: string) => {
+    const user = organizationUsers.find((item) => item.userId === userId);
+    if (!user) return;
+    setInviteForm((current) => ({
+      ...current,
+      email: user.email || current.email,
+      fullName: user.fullName || current.fullName,
+      roleTitle: current.roleTitle || 'Admin',
+    }));
+  };
+
+  const saveAdminAccess = async (adminId: string) => {
+    const admin = adminUsers?.admins.find((item) => item.id === adminId);
+    if (!admin) return;
+
+    try {
+      setAdminActionId(adminId);
+      setError(null);
+      setNotice(null);
+      const response = await adminApi.updateDashboardAdmin(adminId, {
+        fullName: admin.fullName,
+        roleTitle: admin.roleTitle,
+        status: admin.status,
+        permissions: admin.permissions,
+      });
+      setAdminUsers(response);
+      setNotice('Dashboard admin access saved.');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to save dashboard admin.');
+    } finally {
+      setAdminActionId(null);
+    }
+  };
+
+  const removeAdminAccess = async (adminId: string) => {
+    try {
+      setAdminActionId(adminId);
+      setError(null);
+      setNotice(null);
+      const response = await adminApi.removeDashboardAdmin(adminId);
+      setAdminUsers(response);
+      setNotice('Dashboard admin removed.');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to remove dashboard admin.');
+    } finally {
+      setAdminActionId(null);
+    }
+  };
+
   if (isLoading && !settings) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -199,7 +348,7 @@ export default function OwnerSettingsPage() {
   if (!settings || !form) {
     return (
       <div className="mx-auto max-w-3xl rounded-[28px] border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">
-        {error || 'Owner settings are not available.'}
+        {error || 'Admin settings are not available.'}
       </div>
     );
   }
@@ -229,9 +378,9 @@ export default function OwnerSettingsPage() {
       <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Profile Management</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Admin Profile</h1>
             <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-500">
-              Manage the owner identity, organization details, dashboard appearance, and internal alert preferences.
+              Manage the admin identity, organization details, login security, dashboard users, and internal alert preferences.
             </p>
           </div>
           <button
@@ -283,7 +432,7 @@ export default function OwnerSettingsPage() {
                     )}
                   </div>
                   <h2 className="mt-5 text-lg font-bold text-gray-950">{settings.profile.fullName}</h2>
-                  <p className="mt-2 text-sm leading-6 text-gray-500">Owner account profile image</p>
+                  <p className="mt-2 text-sm leading-6 text-gray-500">Admin account profile image</p>
                   <label className="mt-6 inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-800 transition hover:bg-gray-50">
                     {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
                     Change Photo
@@ -448,13 +597,13 @@ export default function OwnerSettingsPage() {
                 </button>
               </Panel>
 
-              <Panel title="Owner Card">
+                <Panel title="Admin Card">
                 <div className="rounded-[24px] border border-gray-200 bg-gray-50 p-5 text-center">
                   <div className="mx-auto flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-white text-xl font-bold text-[#5b45ff] shadow-sm">
                     {avatarPreview ? <img src={avatarPreview} alt={form.fullName} className="h-full w-full object-cover" /> : getInitials(form.fullName)}
                   </div>
                   <h3 className="mt-4 text-xl font-bold text-gray-950">{form.fullName}</h3>
-                  <p className="mt-1 text-sm text-gray-500">{form.roleTitle || 'Owner'}</p>
+                  <p className="mt-1 text-sm text-gray-500">{form.roleTitle || 'Admin'}</p>
                   <div className="mt-4 rounded-2xl bg-white p-4 text-left text-sm">
                     <p className="font-semibold text-gray-950">{form.organizationName || 'Connektly'}</p>
                     <p className="mt-1 truncate text-gray-500">{form.organizationWebsite || 'No website saved'}</p>
@@ -464,120 +613,57 @@ export default function OwnerSettingsPage() {
             </div>
           ) : null}
 
-          {activeTab === 'customization' ? (
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-              <Panel title="Dashboard Appearance">
-                <div className="space-y-5">
-                  <div>
-                    <span className={labelClass}>Theme</span>
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      {(['system', 'light', 'dark'] as const).map((theme) => (
-                        <button
-                          key={theme}
-                          type="button"
-                          onClick={() => setForm((current) => (current ? { ...current, dashboardTheme: theme } : current))}
-                          className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
-                            form.dashboardTheme === theme
-                              ? 'border-[#5b45ff] bg-[#f5f3ff] text-[#5b45ff]'
-                              : 'border-gray-200 bg-gray-50 text-gray-600 hover:bg-white'
-                          }`}
-                        >
-                          {labelize(theme)}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <span className={labelClass}>Density</span>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {(['comfortable', 'compact'] as const).map((density) => (
-                        <button
-                          key={density}
-                          type="button"
-                          onClick={() => setForm((current) => (current ? { ...current, density } : current))}
-                          className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
-                            form.density === density
-                              ? 'border-[#5b45ff] bg-[#f5f3ff] text-[#5b45ff]'
-                              : 'border-gray-200 bg-gray-50 text-gray-600 hover:bg-white'
-                          }`}
-                        >
-                          {labelize(density)}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <span className={labelClass}>Accent Color</span>
-                    <div className="flex flex-wrap items-center gap-3">
-                      {accentOptions.map((color) => (
-                        <button
-                          key={color}
-                          type="button"
-                          onClick={() => setForm((current) => (current ? { ...current, accentColor: color } : current))}
-                          className={`flex h-11 w-11 items-center justify-center rounded-full border-2 ${
-                            form.accentColor.toLowerCase() === color.toLowerCase() ? 'border-gray-950' : 'border-white'
-                          } shadow-sm`}
-                          style={{ backgroundColor: color }}
-                          aria-label={`Use ${color}`}
-                        >
-                          {form.accentColor.toLowerCase() === color.toLowerCase() ? <Check className="h-5 w-5 text-white" /> : null}
-                        </button>
-                      ))}
+          {activeTab === 'security' ? (
+            <div className="grid gap-6 xl:grid-cols-2">
+              <Panel title="Login Credentials">
+                <div className="space-y-4">
+                  <label className="block">
+                    <span className={labelClass}>Login Email</span>
+                    <div className="relative">
+                      <Mail className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
                       <input
-                        type="color"
-                        value={form.accentColor}
-                        onChange={(event) => setForm((current) => (current ? { ...current, accentColor: event.target.value } : current))}
-                        className="h-11 w-16 rounded-2xl border border-gray-200 bg-white p-1"
+                        type="email"
+                        value={accountForm.loginEmail}
+                        onChange={(event) => setAccountForm((current) => ({ ...current, loginEmail: event.target.value }))}
+                        className={`${inputClass} pl-12`}
+                        placeholder="admin@connektly.in"
                       />
                     </div>
+                  </label>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <label className="block">
+                      <span className={labelClass}>New Password</span>
+                      <input
+                        type="password"
+                        value={accountForm.newPassword}
+                        onChange={(event) => setAccountForm((current) => ({ ...current, newPassword: event.target.value }))}
+                        className={inputClass}
+                        placeholder="Leave blank to keep current"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className={labelClass}>Confirm Password</span>
+                      <input
+                        type="password"
+                        value={accountForm.confirmPassword}
+                        onChange={(event) => setAccountForm((current) => ({ ...current, confirmPassword: event.target.value }))}
+                        className={inputClass}
+                        placeholder="Confirm new password"
+                      />
+                    </label>
                   </div>
-
                   <button
                     type="button"
                     disabled={isSaving}
-                    onClick={() =>
-                      void saveSettings(
-                        {
-                          dashboardTheme: form.dashboardTheme,
-                          density: form.density,
-                          accentColor: form.accentColor,
-                        },
-                        'Dashboard customization saved.',
-                      )
-                    }
+                    onClick={() => void saveAccount()}
                     className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#5b45ff] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#4c38e0] disabled:opacity-60"
                   >
-                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Palette className="h-4 w-4" />}
-                    Save Customization
+                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <LockKeyhole className="h-4 w-4" />}
+                    Save Login
                   </button>
                 </div>
               </Panel>
 
-              <Panel title="Preview">
-                <div className="overflow-hidden rounded-[24px] border border-gray-200 bg-white">
-                  <div className="p-4 text-white" style={{ backgroundColor: form.accentColor }}>
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] opacity-80">Owner Dashboard</p>
-                    <h3 className="mt-2 text-xl font-bold">{form.organizationName || 'Connektly'}</h3>
-                  </div>
-                  <div className={form.density === 'compact' ? 'space-y-2 p-4' : 'space-y-3 p-5'}>
-                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                      <p className="text-sm font-semibold text-gray-950">Live Status</p>
-                      <p className="mt-1 text-xs text-gray-500">{labelize(form.dashboardTheme)} theme</p>
-                    </div>
-                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                      <p className="text-sm font-semibold text-gray-950">Webhook Alerts</p>
-                      <p className="mt-1 text-xs text-gray-500">{form.density === 'compact' ? 'Compact rows' : 'Comfortable rows'}</p>
-                    </div>
-                  </div>
-                </div>
-              </Panel>
-            </div>
-          ) : null}
-
-          {activeTab === 'security' ? (
-            <div className="grid gap-6 xl:grid-cols-2">
               <Panel title="Account Security">
                 <div className="space-y-3">
                   <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
@@ -614,21 +700,23 @@ export default function OwnerSettingsPage() {
                 </div>
               </Panel>
 
-              <Panel title="Owner Allowlist">
+              <Panel title="Dashboard Access">
                 <div className="space-y-3">
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Allowed Emails</p>
-                      <p className="mt-2 text-2xl font-bold text-gray-950">{settings.allowlist.emails}</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Role</p>
+                      <p className="mt-2 text-lg font-bold text-gray-950">{labelize(settings.access.role)}</p>
                     </div>
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Allowed User IDs</p>
-                      <p className="mt-2 text-2xl font-bold text-gray-950">{settings.allowlist.userIds}</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Primary Owner</p>
+                      <p className="mt-2 truncate text-lg font-bold text-gray-950">{settings.access.primaryOwnerEmail}</p>
                     </div>
                   </div>
                   <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Current Access</p>
-                    <p className="mt-2 text-sm font-semibold text-gray-950">{labelize(settings.allowlist.currentAccountAllowedBy)}</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Enabled Features</p>
+                    <p className="mt-2 text-sm font-semibold text-gray-950">
+                      {settings.access.isPrimaryOwner ? 'All dashboard features' : `${settings.access.permissions.length} selected features`}
+                    </p>
                   </div>
                   <Link
                     to="/dashboard/audit"
@@ -643,43 +731,218 @@ export default function OwnerSettingsPage() {
           ) : null}
 
           {activeTab === 'users' ? (
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-              <Panel title="User Management">
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Access Source</p>
-                    <p className="mt-2 text-lg font-bold text-gray-950">{labelize(settings.allowlist.currentAccountAllowedBy)}</p>
+            settings.access.canManageAdmins ? (
+              <div className="space-y-6">
+                <Panel title="Invite Dashboard Admin" description="Invite organization users and choose which admin dashboard features they can access.">
+                  {organizationUsers.length ? (
+                    <label className="mb-4 block">
+                      <span className={labelClass}>Choose Existing Organization User</span>
+                      <select value="" onChange={(event) => useOrganizationUserForInvite(event.target.value)} className={inputClass}>
+                        <option value="">Select a user to prefill invite details</option>
+                        {organizationUsers.map((user) => (
+                          <option key={user.userId} value={user.userId}>
+                            {user.fullName} - {user.email}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                  <div className="grid gap-4 lg:grid-cols-3">
+                    <label className="block">
+                      <span className={labelClass}>Email</span>
+                      <input
+                        type="email"
+                        value={inviteForm.email}
+                        onChange={(event) => setInviteForm((current) => ({ ...current, email: event.target.value }))}
+                        className={inputClass}
+                        placeholder="teammate@connektly.in"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className={labelClass}>Full Name</span>
+                      <input
+                        value={inviteForm.fullName}
+                        onChange={(event) => setInviteForm((current) => ({ ...current, fullName: event.target.value }))}
+                        className={inputClass}
+                        placeholder="Team member"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className={labelClass}>Role Title</span>
+                      <input
+                        value={inviteForm.roleTitle}
+                        onChange={(event) => setInviteForm((current) => ({ ...current, roleTitle: event.target.value }))}
+                        className={inputClass}
+                        placeholder="Support Admin"
+                      />
+                    </label>
                   </div>
-                  <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Owner Emails</p>
-                    <p className="mt-2 text-lg font-bold text-gray-950">{settings.allowlist.emails}</p>
+                  <div className="mt-5 grid gap-3 md:grid-cols-2">
+                    {(adminUsers?.permissions || []).map((permission) => (
+                      <ToggleRow
+                        key={permission.key}
+                        title={permission.label}
+                        description={permission.description}
+                        checked={inviteForm.permissions.includes(permission.key)}
+                        onChange={(checked) => toggleInvitePermission(permission.key, checked)}
+                      />
+                    ))}
                   </div>
-                  <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Owner IDs</p>
-                    <p className="mt-2 text-lg font-bold text-gray-950">{settings.allowlist.userIds}</p>
-                  </div>
-                </div>
-                <Link
-                  to="/dashboard/users"
-                  className="mt-5 inline-flex items-center justify-center gap-2 rounded-2xl bg-[#5b45ff] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#4c38e0]"
-                >
-                  <Users className="h-4 w-4" />
-                  Open User Directory
-                </Link>
-              </Panel>
+                  <button
+                    type="button"
+                    disabled={adminActionId === 'invite'}
+                    onClick={() => void inviteAdmin()}
+                    className="mt-5 inline-flex items-center justify-center gap-2 rounded-2xl bg-[#5b45ff] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#4c38e0] disabled:opacity-60"
+                  >
+                    {adminActionId === 'invite' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    Send Invite
+                  </button>
+                </Panel>
 
-              <Panel title="Owner Role">
-                <div className="rounded-[24px] border border-gray-200 bg-gray-50 p-5">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#f5f3ff] text-[#5b45ff]">
-                    <ShieldCheck className="h-6 w-6" />
+                <Panel title="Dashboard Admins" description="Primary owner has full access. Other admins only see the features selected here.">
+                  <div className="space-y-4">
+                    {(adminUsers?.admins || []).map((admin) => (
+                      <div key={admin.id} className="rounded-[24px] border border-gray-200 bg-gray-50 p-4">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="text-base font-bold text-gray-950">{admin.fullName}</h3>
+                              <StatusBadge
+                                status={admin.isPrimaryOwner ? 'primary owner' : admin.status}
+                                severity={admin.status === 'disabled' ? 'critical' : admin.status === 'invited' ? 'warning' : 'success'}
+                              />
+                            </div>
+                            <p className="mt-1 text-sm text-gray-500">{admin.email}</p>
+                            <p className="mt-1 text-xs text-gray-400">Last sign in {formatDateTime(admin.lastSignInAt)}</p>
+                          </div>
+                          {!admin.isPrimaryOwner ? (
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                disabled={adminActionId === admin.id}
+                                onClick={() => void saveAdminAccess(admin.id)}
+                                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#111827] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                              >
+                                {adminActionId === admin.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                disabled={adminActionId === admin.id}
+                                onClick={() => void removeAdminAccess(admin.id)}
+                                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 disabled:opacity-60"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Remove
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        {!admin.isPrimaryOwner ? (
+                          <>
+                            <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                              <label className="block">
+                                <span className={labelClass}>Full Name</span>
+                                <input
+                                  value={admin.fullName}
+                                  onChange={(event) =>
+                                    setAdminUsers((current) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            admins: current.admins.map((item) =>
+                                              item.id === admin.id ? { ...item, fullName: event.target.value } : item,
+                                            ),
+                                          }
+                                        : current,
+                                    )
+                                  }
+                                  className={inputClass}
+                                />
+                              </label>
+                              <label className="block">
+                                <span className={labelClass}>Role Title</span>
+                                <input
+                                  value={admin.roleTitle}
+                                  onChange={(event) =>
+                                    setAdminUsers((current) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            admins: current.admins.map((item) =>
+                                              item.id === admin.id ? { ...item, roleTitle: event.target.value } : item,
+                                            ),
+                                          }
+                                        : current,
+                                    )
+                                  }
+                                  className={inputClass}
+                                />
+                              </label>
+                              <label className="block">
+                                <span className={labelClass}>Status</span>
+                                <select
+                                  value={admin.status}
+                                  onChange={(event) =>
+                                    setAdminUsers((current) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            admins: current.admins.map((item) =>
+                                              item.id === admin.id
+                                                ? { ...item, status: event.target.value as 'active' | 'invited' | 'disabled' }
+                                                : item,
+                                            ),
+                                          }
+                                        : current,
+                                    )
+                                  }
+                                  className={inputClass}
+                                >
+                                  <option value="active">Active</option>
+                                  <option value="invited">Invited</option>
+                                  <option value="disabled">Disabled</option>
+                                </select>
+                              </label>
+                            </div>
+                            <div className="mt-4 grid gap-3 md:grid-cols-2">
+                              {(adminUsers?.permissions || []).map((permission) => (
+                                <ToggleRow
+                                  key={permission.key}
+                                  title={permission.label}
+                                  description={permission.description}
+                                  checked={admin.permissions.includes(permission.key)}
+                                  onChange={(checked) => toggleAdminPermission(admin.id, permission.key, checked)}
+                                />
+                              ))}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="mt-4 flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+                            <ShieldCheck className="h-4 w-4" />
+                            Full access to every dashboard feature
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {adminUsers?.warning ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{adminUsers.warning}</div> : null}
                   </div>
-                  <h3 className="mt-4 text-lg font-bold text-gray-950">Super Admin</h3>
-                  <p className="mt-2 text-sm leading-6 text-gray-500">
-                    Full access to payments, users, live webhooks, server health, and client dashboard notices.
-                  </p>
+                </Panel>
+              </div>
+            ) : (
+              <Panel title="User Management">
+                <div className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                  <XCircle className="mt-0.5 h-5 w-5 text-gray-400" />
+                  <div>
+                    <p className="text-sm font-semibold text-gray-950">Primary owner access required</p>
+                    <p className="mt-1 text-sm leading-6 text-gray-500">
+                      Only {settings.access.primaryOwnerEmail} can invite dashboard admins and assign feature access.
+                    </p>
+                  </div>
                 </div>
               </Panel>
-            </div>
+            )
           ) : null}
 
           {activeTab === 'notifications' ? (
@@ -732,40 +995,6 @@ export default function OwnerSettingsPage() {
             </Panel>
           ) : null}
 
-          {activeTab === 'subscription' ? (
-            <div className="grid gap-6 xl:grid-cols-3">
-              <Panel title="Owner Dashboard">
-                <div className="rounded-[24px] border border-gray-200 bg-gray-50 p-5">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Plan</p>
-                  <p className="mt-2 text-2xl font-bold text-gray-950">Internal</p>
-                  <p className="mt-2 text-sm leading-6 text-gray-500">Reserved for Connektly operators.</p>
-                </div>
-              </Panel>
-              <Panel title="Billing Console">
-                <div className="rounded-[24px] border border-gray-200 bg-gray-50 p-5">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Payments</p>
-                  <p className="mt-2 text-2xl font-bold text-gray-950">Razorpay</p>
-                  <Link
-                    to="/dashboard/payments"
-                    className="mt-4 inline-flex items-center justify-center gap-2 rounded-2xl bg-[#111827] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1f2937]"
-                  >
-                    <CreditCard className="h-4 w-4" />
-                    Open Payments
-                  </Link>
-                </div>
-              </Panel>
-              <Panel title="Last Updated">
-                <div className="rounded-[24px] border border-gray-200 bg-gray-50 p-5">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Profile</p>
-                  <p className="mt-2 text-sm font-semibold text-gray-950">{formatDateTime(settings.profile.updatedAt)}</p>
-                  <div className="mt-4 flex items-center gap-2 text-sm text-emerald-700">
-                    <Check className="h-4 w-4" />
-                    Active owner access
-                  </div>
-                </div>
-              </Panel>
-            </div>
-          ) : null}
         </div>
       </div>
     </div>

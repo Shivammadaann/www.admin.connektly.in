@@ -29,7 +29,7 @@ export function formatNumber(value: number) {
   return new Intl.NumberFormat('en-IN').format(value);
 }
 
-export function formatCurrency(value: number, currency = 'USD') {
+export function formatCurrency(value: number, currency = 'INR') {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency,

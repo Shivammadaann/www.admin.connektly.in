@@ -1,26 +1,146 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Activity,
+  AlertTriangle,
+  Building2,
   CreditCard,
+  IndianRupee,
   Loader2,
   MessageSquare,
-  Phone,
   RefreshCcw,
-  Server,
+  TrendingDown,
+  TrendingUp,
   Users,
-  Webhook,
 } from 'lucide-react';
 import { adminApi } from '../lib/adminApi';
-import { useLiveEvents } from '../lib/liveEvents';
-import { formatDateTime, formatNumber, labelize } from '../lib/format';
-import type { AdminOverview } from '../lib/types';
-import LiveEventFeed from '../components/LiveEventFeed';
-import MetricCard from '../components/MetricCard';
+import { formatCurrency, formatDateTime, formatNumber } from '../lib/format';
+import type { AdminOverview, Severity } from '../lib/types';
 import Panel from '../components/Panel';
 import StatusBadge from '../components/StatusBadge';
 
+type Tone = 'violet' | 'emerald' | 'sky' | 'amber' | 'rose' | 'slate';
+
+const toneClasses: Record<Tone, string> = {
+  violet: 'bg-[#f5f3ff] text-[#5b45ff] border-[#dcd6ff]',
+  emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+  sky: 'bg-sky-50 text-sky-700 border-sky-100',
+  amber: 'bg-amber-50 text-amber-700 border-amber-100',
+  rose: 'bg-rose-50 text-rose-700 border-rose-100',
+  slate: 'bg-slate-50 text-slate-700 border-slate-200',
+};
+
+function CompactKpi({
+  label,
+  value,
+  detail,
+  Icon,
+  tone = 'slate',
+}: {
+  label: string;
+  value: string | number;
+  detail: string;
+  Icon: typeof Building2;
+  tone?: Tone;
+}) {
+  return (
+    <div className="rounded-[18px] border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">{label}</p>
+          <p className="mt-2 truncate text-2xl font-bold tracking-tight text-gray-950">{value}</p>
+        </div>
+        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border ${toneClasses[tone]}`}>
+          <Icon className="h-4 w-4" />
+        </div>
+      </div>
+      <p className="mt-2 truncate text-xs text-gray-500">{detail}</p>
+    </div>
+  );
+}
+
+function SimpleBarChart({
+  data,
+  formatter = formatNumber,
+}: {
+  data: Array<{ label: string; value: number }>;
+  formatter?: (value: number) => string;
+}) {
+  const max = Math.max(...data.map((item) => item.value), 1);
+  return (
+    <div className="flex h-52 items-end gap-2">
+      {data.map((item) => (
+        <div key={item.label} className="flex min-w-0 flex-1 flex-col items-center gap-2">
+          <div className="flex h-40 w-full items-end rounded-xl bg-gray-50 px-1.5 pb-1.5">
+            <div
+              className="w-full rounded-lg bg-[#5b45ff]"
+              style={{ height: `${Math.max(6, Math.round((item.value / max) * 100))}%` }}
+              title={`${item.label}: ${formatter(item.value)}`}
+            />
+          </div>
+          <span className="max-w-full truncate text-[11px] font-medium text-gray-500">{item.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DualBarChart({ data }: { data: AdminOverview['charts']['customerMovement'] }) {
+  const max = Math.max(...data.flatMap((item) => [item.newCustomers, item.churnedCustomers]), 1);
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-4 text-xs font-semibold text-gray-500">
+        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />New</span>
+        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-rose-500" />Churned</span>
+      </div>
+      <div className="flex h-48 items-end gap-2">
+        {data.map((item) => (
+          <div key={item.label} className="flex min-w-0 flex-1 flex-col items-center gap-2">
+            <div className="flex h-36 w-full items-end justify-center gap-1 rounded-xl bg-gray-50 px-1.5 pb-1.5">
+              <div
+                className="w-1/2 rounded-lg bg-emerald-500"
+                style={{ height: `${Math.max(5, Math.round((item.newCustomers / max) * 100))}%` }}
+                title={`${item.label}: ${formatNumber(item.newCustomers)} new`}
+              />
+              <div
+                className="w-1/2 rounded-lg bg-rose-500"
+                style={{ height: `${Math.max(5, Math.round((item.churnedCustomers / max) * 100))}%` }}
+                title={`${item.label}: ${formatNumber(item.churnedCustomers)} churned`}
+              />
+            </div>
+            <span className="max-w-full truncate text-[11px] font-medium text-gray-500">{item.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HorizontalBars({ data }: { data: Array<{ label: string; value: number }> }) {
+  const max = Math.max(...data.map((item) => item.value), 1);
+  return (
+    <div className="space-y-4">
+      {data.map((item) => (
+        <div key={item.label}>
+          <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+            <span className="font-semibold text-gray-800">{item.label}</span>
+            <span className="font-semibold text-gray-950">{formatNumber(item.value)}</span>
+          </div>
+          <div className="h-3 rounded-full bg-gray-100">
+            <div className="h-3 rounded-full bg-[#5b45ff]" style={{ width: `${Math.max(4, Math.round((item.value / max) * 100))}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function alertTone(severity: Severity) {
+  if (severity === 'critical') return 'border-rose-200 bg-rose-50 text-rose-700';
+  if (severity === 'warning') return 'border-amber-200 bg-amber-50 text-amber-700';
+  if (severity === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  return 'border-slate-200 bg-slate-50 text-slate-700';
+}
+
 export default function CommandCenter() {
-  const { events } = useLiveEvents();
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +151,7 @@ export default function CommandCenter() {
       setIsLoading(true);
       setOverview(await adminApi.getOverview());
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to load Admin Control Centre.');
+      setError(error instanceof Error ? error.message : 'Failed to load overview.');
     } finally {
       setIsLoading(false);
     }
@@ -41,18 +161,56 @@ export default function CommandCenter() {
     void load();
   }, []);
 
-  const mergedEvents = useMemo(() => {
-    const combined = [...events, ...(overview?.timeline || [])];
-    const seen = new Set<string>();
-    return combined
-      .filter((event) => {
-        if (seen.has(event.id)) return false;
-        seen.add(event.id);
-        return true;
-      })
-      .sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt))
-      .slice(0, 30);
-  }, [events, overview?.timeline]);
+  const kpis = useMemo(
+    () =>
+      overview
+        ? [
+            {
+              label: 'Total Organizations',
+              value: formatNumber(overview.metrics.totalOrganizations),
+              detail: 'All workspace profiles',
+              Icon: Building2,
+              tone: 'violet' as Tone,
+            },
+            {
+              label: 'Active Organizations',
+              value: formatNumber(overview.metrics.activeOrganizations),
+              detail: `${formatNumber(overview.metrics.paidWorkspaces)} paid`,
+              Icon: TrendingUp,
+              tone: 'emerald' as Tone,
+            },
+            {
+              label: 'Total Users',
+              value: formatNumber(overview.metrics.totalUsers),
+              detail: 'Across all orgs',
+              Icon: Users,
+              tone: 'sky' as Tone,
+            },
+            {
+              label: 'Messages Sent',
+              value: formatNumber(overview.metrics.messagesSent),
+              detail: `${formatNumber(overview.metrics.messages24h)} in 24h`,
+              Icon: MessageSquare,
+              tone: 'slate' as Tone,
+            },
+            {
+              label: 'MRR',
+              value: formatCurrency(overview.metrics.monthlyRecurringRevenue),
+              detail: 'Monthly recurring revenue',
+              Icon: IndianRupee,
+              tone: 'amber' as Tone,
+            },
+            {
+              label: 'Churn Rate',
+              value: `${overview.metrics.churnRate.toFixed(1)}%`,
+              detail: 'Churned vs active base',
+              Icon: TrendingDown,
+              tone: overview.metrics.churnRate > 0 ? ('rose' as Tone) : ('emerald' as Tone),
+            },
+          ]
+        : [],
+    [overview],
+  );
 
   if (isLoading && !overview) {
     return (
@@ -63,17 +221,22 @@ export default function CommandCenter() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
-      <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="mx-auto max-w-7xl space-y-5">
+      <section className="rounded-[20px] border border-gray-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Connektly operations</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-500">
-              Live workspace, billing, webhook, and system signals from the client dashboard database.
+            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Overview</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-500">
+              Global organization, usage, revenue, channel, and alert signals.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            {overview?.health ? <StatusBadge status={overview.health.status} severity={overview.health.status === 'ok' ? 'success' : overview.health.status === 'warning' ? 'warning' : 'critical'} /> : null}
+            {overview?.health ? (
+              <StatusBadge
+                status={overview.health.status}
+                severity={overview.health.status === 'ok' ? 'success' : overview.health.status === 'warning' ? 'warning' : 'critical'}
+              />
+            ) : null}
             <button
               type="button"
               onClick={() => void load()}
@@ -90,64 +253,52 @@ export default function CommandCenter() {
 
       {overview ? (
         <>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard label="Total users" value={formatNumber(overview.metrics.totalUsers)} detail={`${formatNumber(overview.metrics.workspaces)} workspace profiles`} Icon={Users} tone="violet" />
-            <MetricCard label="Paid workspaces" value={formatNumber(overview.metrics.paidWorkspaces)} detail={`${formatNumber(overview.metrics.trialWorkspaces)} trial workspaces`} Icon={CreditCard} tone="emerald" />
-            <MetricCard label="Messages 24h" value={formatNumber(overview.metrics.messages24h)} detail={`${formatNumber(overview.metrics.conversations)} total conversations`} Icon={MessageSquare} tone="sky" />
-            <MetricCard label="Webhook hits 24h" value={formatNumber(overview.metrics.leadWebhooks24h)} detail={`${formatNumber(overview.metrics.emailCampaigns24h)} bulk email campaigns`} Icon={Webhook} tone="amber" />
-            <MetricCard label="Connected channels" value={formatNumber(overview.metrics.connectedChannels)} detail="WhatsApp, Instagram, and Messenger connections" Icon={Activity} tone="slate" />
-            <MetricCard label="Calls 24h" value={formatNumber(overview.metrics.calls24h)} detail={`${formatNumber(overview.metrics.activeCalls)} currently active sessions`} Icon={Phone} tone="emerald" />
-            <MetricCard label="Credit balance" value={formatNumber(overview.metrics.totalCreditBalance)} detail="Net ledger across all workspaces" Icon={CreditCard} tone="violet" />
-            <MetricCard label="Server uptime" value={`${formatNumber(overview.health.uptimeSeconds)}s`} detail={`${overview.health.dbLatencyMs ?? 'N/A'}ms database check`} Icon={Server} tone={overview.health.status === 'ok' ? 'emerald' : 'amber'} />
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+            {kpis.map((kpi) => (
+              <CompactKpi key={kpi.label} {...kpi} />
+            ))}
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
-            <Panel title="Live operations feed" description={`Last updated ${formatDateTime(overview.generatedAt)}`}>
-              <LiveEventFeed events={mergedEvents} />
-            </Panel>
-
-            <div className="space-y-6">
-              <Panel title="Plan distribution">
-                <div className="space-y-3">
-                  {Object.entries(overview.planBreakdown).map(([plan, count]) => (
-                    <div key={plan} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-semibold text-gray-900">{labelize(plan)}</span>
-                        <span className="text-sm font-semibold text-[#5b45ff]">{count}</span>
-                      </div>
-                      <div className="mt-3 h-2 rounded-full bg-gray-200">
-                        <div
-                          className="h-2 rounded-full bg-[#5b45ff]"
-                          style={{
-                            width: `${Math.max(8, Math.round((count / Math.max(overview.metrics.workspaces, 1)) * 100))}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="grid gap-5 lg:grid-cols-2">
+              <Panel title="Revenue Growth" description="MRR over time">
+                <SimpleBarChart data={overview.charts.revenueGrowth} formatter={formatCurrency} />
               </Panel>
 
-              <Panel title="Recent workspaces">
-                <div className="space-y-3">
-                  {overview.recentUsers.map((user) => (
-                    <div key={user.userId} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-gray-950">{user.companyName || user.fullName}</p>
-                          <p className="mt-1 truncate text-xs text-gray-500">{user.email || user.userId}</p>
-                        </div>
-                        <StatusBadge status={user.billingStatus || 'no billing'} compact />
-                      </div>
-                      <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-500">
-                        <span>{user.channels.length} channels</span>
-                        <span>{user.counts.conversations} conversations</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              <Panel title="New vs Churned Customers">
+                <DualBarChart data={overview.charts.customerMovement} />
+              </Panel>
+
+              <Panel title="Message Volume Trend">
+                <SimpleBarChart data={overview.charts.messageVolume} />
+              </Panel>
+
+              <Panel title="Channel Usage" description="WA / IG / Email">
+                <HorizontalBars data={overview.charts.channelUsage} />
               </Panel>
             </div>
+
+            <Panel title="Alerts Panel" description={`Updated ${formatDateTime(overview.generatedAt)}`}>
+              <div className="space-y-3">
+                {overview.alerts.map((alert) => (
+                  <div key={alert.key} className={`rounded-2xl border p-4 ${alertTone(alert.severity)}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="h-4 w-4 shrink-0" />
+                          <p className="truncate text-sm font-bold">{alert.label}</p>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 opacity-80">{alert.detail}</p>
+                      </div>
+                      <p className="shrink-0 text-xl font-bold">
+                        {formatNumber(alert.value)}
+                        {alert.suffix || ''}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
           </div>
         </>
       ) : null}

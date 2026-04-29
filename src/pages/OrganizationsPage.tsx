@@ -18,6 +18,7 @@ import type { AdminOrganizationDetail, AdminOrganizationsResponse } from '../lib
 import { formatCurrency, formatDateTime, formatNumber, labelize } from '../lib/format';
 import LiveEventFeed from '../components/LiveEventFeed';
 import MetricCard from '../components/MetricCard';
+import Modal from '../components/Modal';
 import Panel from '../components/Panel';
 import StatusBadge from '../components/StatusBadge';
 
@@ -42,6 +43,7 @@ export default function OrganizationsPage() {
   const [data, setData] = useState<AdminOrganizationsResponse | null>(null);
   const [detail, setDetail] = useState<AdminOrganizationDetail | null>(null);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  const [manageOrgId, setManageOrgId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
   const [plan, setPlan] = useState('all');
@@ -90,12 +92,13 @@ export default function OrganizationsPage() {
   }, []);
 
   useEffect(() => {
-    if (selectedOrgId) {
-      void loadDetail(selectedOrgId);
+    if (manageOrgId) {
+      setSelectedOrgId(manageOrgId);
+      void loadDetail(manageOrgId);
     } else {
       setDetail(null);
     }
-  }, [selectedOrgId]);
+  }, [manageOrgId]);
 
   const runAction = async (
     action: 'suspend' | 'activate' | 'delete' | 'ban' | 'unban' | 'update_plan' | 'impersonate',
@@ -143,6 +146,11 @@ export default function OrganizationsPage() {
     if (!detail) return 'Update plan';
     return planRank(planDraft) >= planRank(detail.organization.plan) ? 'Upgrade plan' : 'Downgrade plan';
   }, [detail, planDraft]);
+
+  const openManageModal = (orgId: string) => {
+    setSelectedOrgId(orgId);
+    setManageOrgId(orgId);
+  };
 
   if (isLoading && !data) {
     return (
@@ -252,19 +260,13 @@ export default function OrganizationsPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-100 bg-white">
                     {data.organizations.map((organization) => {
-                      const selected = selectedOrgId === organization.orgId;
-                      const isRestricted = ['suspended', 'banned', 'deleted'].includes(organization.status.toLowerCase());
                       return (
-                        <tr key={organization.orgId} className={selected ? 'bg-[#f5f3ff]' : undefined}>
+                        <tr key={organization.orgId}>
                           <td className="px-4 py-4">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedOrgId(organization.orgId)}
-                              className="block max-w-[280px] text-left"
-                            >
+                            <div className="max-w-[280px]">
                               <span className="block truncate font-semibold text-gray-950">{organization.orgName}</span>
                               <span className="mt-1 block truncate text-xs text-gray-500">{organization.ownerEmail || organization.ownerUserId}</span>
-                            </button>
+                            </div>
                           </td>
                           <td className="px-4 py-4">
                             <div className="text-sm font-semibold text-gray-950">{labelize(organization.plan)}</div>
@@ -282,37 +284,13 @@ export default function OrganizationsPage() {
                           <td className="px-4 py-4 font-semibold text-gray-950">{formatCurrency(organization.revenue)}</td>
                           <td className="px-4 py-4 text-xs text-gray-500">{formatDateTime(organization.createdAt)}</td>
                           <td className="px-4 py-4">
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setSelectedOrgId(organization.orgId)}
-                                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
-                              >
-                                View
-                              </button>
-                              <button
-                                type="button"
-                                disabled={actionLoading === 'impersonate'}
-                                onClick={() => {
-                                  setSelectedOrgId(organization.orgId);
-                                  void runAction('impersonate', {}, organization.orgId);
-                                }}
-                                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
-                              >
-                                Impersonate
-                              </button>
-                              <button
-                                type="button"
-                                disabled={actionLoading === 'suspend' || actionLoading === 'activate'}
-                                onClick={() => {
-                                  setSelectedOrgId(organization.orgId);
-                                  void runAction(isRestricted ? 'activate' : 'suspend', {}, organization.orgId);
-                                }}
-                                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
-                              >
-                                {isRestricted ? 'Activate' : 'Suspend'}
-                              </button>
-                            </div>
+                            <button
+                              type="button"
+                              onClick={() => openManageModal(organization.orgId)}
+                              className="rounded-xl bg-[#111827] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#1f2937]"
+                            >
+                              Manage
+                            </button>
                           </td>
                         </tr>
                       );
@@ -323,7 +301,13 @@ export default function OrganizationsPage() {
             )}
           </Panel>
 
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+          <Modal
+            title="Manage Organization"
+            description={selectedOrganization?.orgName || 'Organization controls and detail view'}
+            isOpen={Boolean(manageOrgId)}
+            onClose={() => setManageOrgId(null)}
+          >
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
             <div className="space-y-6">
               <Panel title="Organization actions" description={selectedOrganization?.orgName || 'Select an organization'}>
                 {selectedOrganization ? (
@@ -530,7 +514,8 @@ export default function OrganizationsPage() {
                 )}
               </Panel>
             </div>
-          </div>
+            </div>
+          </Modal>
         </>
       ) : null}
     </div>

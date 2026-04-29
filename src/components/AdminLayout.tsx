@@ -6,40 +6,59 @@ import {
   Building2,
   CreditCard,
   Gauge,
+  Globe2,
   LayoutDashboard,
   LogOut,
   Menu,
   Search,
-  Server,
   Settings,
-  ShieldCheck,
+  SlidersHorizontal,
+  ScrollText,
   Users,
-  Webhook,
   X,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useLiveEvents } from '../lib/liveEvents';
 import { adminApi } from '../lib/adminApi';
+import type { AdminAccessSummary, AdminPermissionKey } from '../lib/types';
 import { formatShortTime, getInitials } from '../lib/format';
 import BrandMark from './BrandMark';
 import LiveEventFeed from './LiveEventFeed';
 
-const navItems = [
-  { label: 'Command Center', path: '/dashboard', icon: LayoutDashboard },
-  { label: 'Organization Management', path: '/dashboard/organizations', icon: Building2 },
-  { label: 'Global Users', path: '/dashboard/users', icon: Users },
-  { label: 'Payments', path: '/dashboard/payments', icon: CreditCard },
-  { label: 'Webhooks Live', path: '/dashboard/webhooks', icon: Webhook },
-  { label: 'Server Status', path: '/dashboard/server', icon: Server },
-  { label: 'Security Audit', path: '/dashboard/audit', icon: ShieldCheck },
-  { label: 'Owner Profile', path: '/dashboard/settings', icon: Settings },
-];
+type NavItem = { label: string; path: string; icon: typeof LayoutDashboard; permissions?: AdminPermissionKey[] };
+
+const navSections = [
+  {
+    title: null,
+    items: [
+      { label: 'Overview', path: '/dashboard', icon: LayoutDashboard, permissions: ['command_center'] },
+      { label: 'Organization Management', path: '/dashboard/organizations', icon: Building2, permissions: ['organizations'] },
+      { label: 'Global Users', path: '/dashboard/users', icon: Users, permissions: ['global_users'] },
+      { label: 'Payments', path: '/dashboard/payments', icon: CreditCard, permissions: ['payments'] },
+      { label: 'User Platform Settings', path: '/dashboard/platform-settings', icon: SlidersHorizontal, permissions: ['platform_settings'] },
+      { label: 'Global Integrations', path: '/dashboard/global-integrations', icon: Globe2, permissions: ['global_integrations'] },
+      { label: 'Admin Profile', path: '/dashboard/settings', icon: Settings },
+    ],
+  },
+  {
+    title: 'Logs & Monitoring',
+    items: [
+      {
+        label: 'Logs & Monitoring',
+        path: '/dashboard/logs-monitoring',
+        icon: ScrollText,
+        permissions: ['logs_monitoring', 'webhooks', 'server_status', 'security_audit'],
+      },
+    ],
+  },
+] satisfies Array<{ title: string | null; items: NavItem[] }>;
 
 type AdminLayoutProps = {
   adminEmail: string | null;
+  adminAccess: AdminAccessSummary | null;
 };
 
-export default function AdminLayout({ adminEmail }: AdminLayoutProps) {
+export default function AdminLayout({ adminEmail, adminAccess }: AdminLayoutProps) {
   const navigate = useNavigate();
   const { events, status, unreadCount, clearUnread } = useLiveEvents();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -49,6 +68,11 @@ export default function AdminLayout({ adminEmail }: AdminLayoutProps) {
   const displayName = ownerProfile?.fullName || adminEmail?.split('@')[0] || 'Owner';
   const avatarUrl = ownerProfile?.avatarUrl || null;
   const statusTone = status === 'connected' ? 'bg-emerald-400' : status === 'connecting' ? 'bg-amber-400' : 'bg-rose-400';
+  const canViewItem = (item: NavItem) =>
+    !item.permissions || adminAccess?.isPrimaryOwner || item.permissions.some((permission) => adminAccess?.permissions.includes(permission));
+  const visibleNavSections = navSections
+    .map((section) => ({ ...section, items: section.items.filter(canViewItem) }))
+    .filter((section) => section.items.length > 0);
 
   const currentTime = useMemo(
     () =>
@@ -135,25 +159,32 @@ export default function AdminLayout({ adminEmail }: AdminLayoutProps) {
 
       <div className="flex-1 overflow-y-auto px-3 py-4 scrollbar-hide">
         <nav className="space-y-1">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              end={item.path === '/dashboard'}
-              onClick={() => setMobileOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium transition ${
-                  isActive ? 'bg-[#5b45ff] text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                }`
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <item.icon className={`h-5 w-5 shrink-0 ${isActive ? 'text-white' : 'text-gray-400'}`} />
-                  <span className="truncate">{item.label}</span>
-                </>
-              )}
-            </NavLink>
+          {visibleNavSections.map((section, sectionIndex) => (
+            <div key={section.title || `main-${sectionIndex}`} className={sectionIndex === 0 ? 'space-y-1' : 'mt-5 space-y-1'}>
+              {section.title ? (
+                <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">{section.title}</p>
+              ) : null}
+              {section.items.map((item) => (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  end={item.path === '/dashboard'}
+                  onClick={() => setMobileOpen(false)}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium transition ${
+                      isActive ? 'bg-[#5b45ff] text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                    }`
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <item.icon className={`h-5 w-5 shrink-0 ${isActive ? 'text-white' : 'text-gray-400'}`} />
+                      <span className="truncate">{item.label}</span>
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
       </div>
@@ -166,7 +197,7 @@ export default function AdminLayout({ adminEmail }: AdminLayoutProps) {
             </div>
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-white">{displayName}</p>
-              <p className="truncate text-xs text-gray-500">{adminEmail || 'Owner account'}</p>
+              <p className="truncate text-xs text-gray-500">{adminEmail || 'Admin account'}</p>
             </div>
           </div>
         </div>

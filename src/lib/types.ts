@@ -71,23 +71,82 @@ export type AdminOverview = {
   generatedAt: string;
   metrics: {
     totalUsers: number;
+    totalOrganizations: number;
+    activeOrganizations: number;
     workspaces: number;
     paidWorkspaces: number;
     trialWorkspaces: number;
     connectedChannels: number;
     conversations: number;
+    messagesSent: number;
     messages24h: number;
     calls24h: number;
     activeCalls: number;
     leadWebhooks24h: number;
     emailCampaigns24h: number;
+    monthlyRecurringRevenue: number;
+    churnRate: number;
     totalCreditBalance: number;
   };
+  charts: {
+    revenueGrowth: Array<{ label: string; value: number }>;
+    customerMovement: Array<{ label: string; newCustomers: number; churnedCustomers: number }>;
+    messageVolume: Array<{ label: string; value: number }>;
+    channelUsage: Array<{ label: string; value: number }>;
+  };
+  alerts: Array<{
+    key: string;
+    label: string;
+    value: number;
+    suffix?: string;
+    severity: Severity;
+    detail: string;
+  }>;
   planBreakdown: Record<string, number>;
   health: SystemHealth;
   timeline: AdminLiveEvent[];
   recentUsers: AdminUserRow[];
   warnings: string[];
+};
+
+export type AdminLogEntry = {
+  id: string;
+  occurredAt: string;
+  orgId: string | null;
+  userId: string | null;
+  category: 'api' | 'error' | 'webhook' | 'message_delivery';
+  source: string;
+  title: string;
+  status: string;
+  errorType: string | null;
+  severity: Severity;
+  detail: string | null;
+  payload: unknown;
+};
+
+export type LogsMonitoringResponse = {
+  generatedAt: string;
+  apiLogs: AdminLogEntry[];
+  errorLogs: AdminLogEntry[];
+  webhookLogs: AdminLogEntry[];
+  messageDeliveryLogs: AdminLogEntry[];
+  errorTypes: string[];
+};
+
+export type GlobalIntegration = {
+  key: string;
+  label: string;
+  status: string;
+  severity: Severity;
+  summary: string;
+  lastCheckedAt: string;
+  metrics: Array<{ label: string; value: number }>;
+};
+
+export type GlobalIntegrationsResponse = {
+  generatedAt: string;
+  integrations: GlobalIntegration[];
+  clientApi: Record<string, unknown> | null;
 };
 
 export type AdminOrganizationRow = {
@@ -154,6 +213,88 @@ export type AdminOrganizationDetail = {
   generatedAt: string;
 };
 
+export type PlatformPricingPlan = {
+  id: string;
+  name: string;
+  currency: string;
+  monthlyPrice: number;
+  annualPrice: number;
+  credits: number;
+  features: string[];
+  isActive: boolean;
+  isRecommended: boolean;
+};
+
+export type PlatformFeatureFlag = {
+  key: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+};
+
+export type PlatformOrgFeatureOverride = {
+  orgId: string;
+  orgName: string;
+  flags: Record<string, boolean>;
+};
+
+export type PlatformRateLimitOverride = {
+  orgId: string;
+  orgName: string;
+  messagesPerMinute: number;
+  apiRequestsPerMinute: number;
+};
+
+export type PlatformApiKey = {
+  id: string;
+  name: string;
+  scope: string;
+  key: string;
+  maskedKey: string;
+  isActive: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+  lastRotatedAt: string | null;
+};
+
+export type PlatformEmailTemplate = {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
+  enabled: boolean;
+  updatedAt: string | null;
+};
+
+export type UserPlatformSettings = {
+  pricing_plans: {
+    plans: PlatformPricingPlan[];
+  };
+  feature_flags: {
+    flags: PlatformFeatureFlag[];
+    orgOverrides: PlatformOrgFeatureOverride[];
+  };
+  rate_limits: {
+    default: {
+      messagesPerMinute: number;
+      apiRequestsPerMinute: number;
+    };
+    orgOverrides: PlatformRateLimitOverride[];
+  };
+  api_keys: {
+    keys: PlatformApiKey[];
+  };
+  email_templates: {
+    templates: PlatformEmailTemplate[];
+  };
+};
+
+export type UserPlatformSettingsResponse = {
+  settings: UserPlatformSettings;
+  warning: string | null;
+  generatedAt: string;
+};
+
 export type OwnerNotificationPreferences = {
   liveEventSound: boolean;
   criticalWebhookAlerts: boolean;
@@ -164,6 +305,59 @@ export type OwnerNotificationPreferences = {
 
 export type OwnerDashboardTheme = 'system' | 'light' | 'dark';
 export type OwnerDashboardDensity = 'comfortable' | 'compact';
+export type AdminPermissionKey =
+  | 'command_center'
+  | 'organizations'
+  | 'global_users'
+  | 'platform_settings'
+  | 'payments'
+  | 'logs_monitoring'
+  | 'global_integrations'
+  | 'webhooks'
+  | 'server_status'
+  | 'security_audit';
+
+export type AdminPermissionDefinition = {
+  key: AdminPermissionKey;
+  label: string;
+  description: string;
+};
+
+export type DashboardAdminUser = {
+  id: string;
+  authUserId: string | null;
+  email: string;
+  fullName: string;
+  roleTitle: string;
+  role: 'primary_owner' | 'admin';
+  status: 'active' | 'invited' | 'disabled';
+  permissions: AdminPermissionKey[];
+  isPrimaryOwner: boolean;
+  invitedBy: string | null;
+  invitedAt: string | null;
+  lastAccessAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  authCreatedAt: string | null;
+  lastSignInAt: string | null;
+};
+
+export type DashboardAdminUsersResponse = {
+  admins: DashboardAdminUser[];
+  permissions: AdminPermissionDefinition[];
+  primaryOwnerEmail: string;
+  warning: string | null;
+  generatedAt: string;
+};
+
+export type AdminAccessSummary = {
+  role: 'primary_owner' | 'admin';
+  status: 'active' | 'invited' | 'disabled';
+  permissions: AdminPermissionKey[];
+  isPrimaryOwner: boolean;
+  canManageAdmins: boolean;
+  primaryOwnerEmail: string;
+};
 
 export type OwnerSettingsResponse = {
   profile: {
@@ -194,8 +388,9 @@ export type OwnerSettingsResponse = {
   allowlist: {
     emails: number;
     userIds: number;
-    currentAccountAllowedBy: 'email' | 'user_id' | 'development';
+    currentAccountAllowedBy: 'primary_owner' | 'database' | 'legacy_env' | 'development';
   };
+  access: AdminAccessSummary;
   warning: string | null;
   generatedAt: string;
 };

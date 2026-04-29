@@ -17,6 +17,7 @@ import { adminApi } from '../lib/adminApi';
 import type { AdminOrganizationRow, AdminUserDetail, AdminUserRow } from '../lib/types';
 import { formatDateTime, formatNumber, labelize } from '../lib/format';
 import MetricCard from '../components/MetricCard';
+import Modal from '../components/Modal';
 import Panel from '../components/Panel';
 import StatusBadge from '../components/StatusBadge';
 
@@ -52,6 +53,7 @@ export default function UsersPage() {
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [organizations, setOrganizations] = useState<AdminOrganizationRow[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [manageUserId, setManageUserId] = useState<string | null>(null);
   const [detail, setDetail] = useState<AdminUserDetail | null>(null);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
@@ -135,12 +137,13 @@ export default function UsersPage() {
   }, []);
 
   useEffect(() => {
-    if (selectedUserId) {
-      void loadDetail(selectedUserId);
+    if (manageUserId) {
+      setSelectedUserId(manageUserId);
+      void loadDetail(manageUserId);
     } else {
       setDetail(null);
     }
-  }, [selectedUserId]);
+  }, [manageUserId]);
 
   const summary = useMemo(() => {
     return {
@@ -154,6 +157,11 @@ export default function UsersPage() {
 
   const selectedRow = users.find((user) => user.userId === selectedUserId);
   const riskUsers = users.filter((user) => getUserRiskFlags(user).length > 0).slice(0, 6);
+
+  const openManageModal = (userId: string) => {
+    setSelectedUserId(userId);
+    setManageUserId(userId);
+  };
 
   const saveBilling = async () => {
     if (!selectedUserId) return;
@@ -354,28 +362,15 @@ export default function UsersPage() {
                   <th className="px-4 py-3 font-semibold">Risk</th>
                   <th className="px-4 py-3 font-semibold">Last sign in</th>
                   <th className="px-4 py-3 font-semibold">State</th>
+                  <th className="px-4 py-3 font-semibold">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 bg-white">
                 {users.map((user) => {
-                  const selected = selectedUserId === user.userId;
                   const riskFlags = getUserRiskFlags(user);
 
                   return (
-                    <tr
-                      key={user.userId}
-                      tabIndex={0}
-                      onClick={() => setSelectedUserId(user.userId)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          setSelectedUserId(user.userId);
-                        }
-                      }}
-                      className={`cursor-pointer outline-none transition hover:bg-[#f8f7ff] focus:bg-[#f8f7ff] ${
-                        selected ? 'bg-[#f5f3ff] ring-1 ring-inset ring-[#5b45ff]' : ''
-                      }`}
-                    >
+                    <tr key={user.userId} className="transition hover:bg-[#f8f7ff]">
                       <td className="px-4 py-4">
                         <div className="min-w-0">
                           <p className="max-w-[260px] truncate font-semibold text-gray-950">{user.fullName}</p>
@@ -453,6 +448,15 @@ export default function UsersPage() {
                           compact
                         />
                       </td>
+                      <td className="px-4 py-4">
+                        <button
+                          type="button"
+                          onClick={() => openManageModal(user.userId)}
+                          className="rounded-xl bg-[#111827] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#1f2937]"
+                        >
+                          Manage
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -462,8 +466,14 @@ export default function UsersPage() {
         )}
       </Panel>
 
-      {selectedRow ? (
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(380px,0.72fr)]">
+      <Modal
+        title="Manage User"
+        description={selectedRow ? `${getSelectedTitle(selectedRow)} | ${selectedRow.email || selectedRow.userId}` : 'User controls and detail view'}
+        isOpen={Boolean(manageUserId)}
+        onClose={() => setManageUserId(null)}
+      >
+        {selectedRow ? (
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(380px,0.72fr)]">
           <div className="space-y-6">
             <Panel
               title={getSelectedTitle(selectedRow)}
@@ -758,14 +768,15 @@ export default function UsersPage() {
               </div>
             </Panel>
           </div>
-        </div>
-      ) : (
-        <Panel title="User details">
-          <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
-            Select a row from the user directory to view details and actions.
           </div>
-        </Panel>
-      )}
+        ) : (
+          <Panel title="User details">
+            <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
+              Select a user to view details and actions.
+            </div>
+          </Panel>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -6,16 +6,17 @@ import { adminApi, AdminApiError } from './lib/adminApi';
 import { clientConfig, hasSupabaseConfig, hasTurnstileSiteKey } from './lib/config';
 import { getCachedSession, supabase } from './lib/supabase';
 import { LiveEventsProvider } from './lib/liveEvents';
+import type { AdminAccessSummary } from './lib/types';
 import AdminLayout from './components/AdminLayout';
 import BrandMark from './components/BrandMark';
 import TurnstileWidget from './components/TurnstileWidget';
 import CommandCenter from './pages/CommandCenter';
 import OrganizationsPage from './pages/OrganizationsPage';
 import UsersPage from './pages/UsersPage';
+import PlatformSettingsPage from './pages/PlatformSettingsPage';
+import LogsMonitoringPage from './pages/LogsMonitoringPage';
+import GlobalIntegrationsPage from './pages/GlobalIntegrationsPage';
 import PaymentsPage from './pages/PaymentsPage';
-import WebhooksPage from './pages/WebhooksPage';
-import ServerStatusPage from './pages/ServerStatusPage';
-import AuditPage from './pages/AuditPage';
 import OwnerSettingsPage from './pages/OwnerSettingsPage';
 
 function LoadingScreen() {
@@ -41,7 +42,7 @@ function SetupRequired() {
           <div className="flex gap-3">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
             <div className="text-sm leading-6">
-              Add `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and an admin allowlist to `.env`.
+              Add `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` to `.env`, then apply `supabase/admin_dashboard.sql`.
             </div>
           </div>
         </div>
@@ -122,7 +123,7 @@ function LoginPage() {
             <LockKeyhole className="h-7 w-7" />
           </div>
           <h2 className="mt-5 text-2xl font-bold text-gray-950">Owner sign in</h2>
-          <p className="mt-2 text-sm leading-6 text-gray-500">Use a Supabase account that is included in the owner allowlist.</p>
+          <p className="mt-2 text-sm leading-6 text-gray-500">Use the primary owner account or an invited dashboard admin account.</p>
 
           {error ? <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
 
@@ -176,10 +177,17 @@ function LoginPage() {
   );
 }
 
-function ProtectedAdmin({ session, children }: { session: Session | null; children: (email: string | null) => ReactNode }) {
+function ProtectedAdmin({
+  session,
+  children,
+}: {
+  session: Session | null;
+  children: (email: string | null, access: AdminAccessSummary | null) => ReactNode;
+}) {
   const location = useLocation();
   const sessionUserId = session?.user.id ?? null;
   const [adminEmail, setAdminEmail] = useState<string | null>(null);
+  const [adminAccess, setAdminAccess] = useState<AdminAccessSummary | null>(null);
   const [isChecking, setIsChecking] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -189,6 +197,7 @@ function ProtectedAdmin({ session, children }: { session: Session | null; childr
     const check = async () => {
       if (!sessionUserId) {
         setAdminEmail(null);
+        setAdminAccess(null);
         setError(null);
         setIsChecking(false);
         return;
@@ -200,6 +209,7 @@ function ProtectedAdmin({ session, children }: { session: Session | null; childr
         const response = await adminApi.me();
         if (!cancelled) {
           setAdminEmail(response.admin.email);
+          setAdminAccess(response.admin.access);
         }
       } catch (error) {
         if (!cancelled) {
@@ -249,7 +259,7 @@ function ProtectedAdmin({ session, children }: { session: Session | null; childr
     );
   }
 
-  return <>{children(adminEmail)}</>;
+  return <>{children(adminEmail, adminAccess)}</>;
 }
 
 function isSameSession(left: Session | null, right: Session | null) {
@@ -306,9 +316,9 @@ export default function App() {
           path="/dashboard"
           element={
             <ProtectedAdmin session={session}>
-              {(adminEmail) => (
+              {(adminEmail, adminAccess) => (
                 <LiveEventsProvider>
-                  <AdminLayout adminEmail={adminEmail} />
+                  <AdminLayout adminEmail={adminEmail} adminAccess={adminAccess} />
                 </LiveEventsProvider>
               )}
             </ProtectedAdmin>
@@ -317,10 +327,13 @@ export default function App() {
           <Route index element={<CommandCenter />} />
           <Route path="organizations" element={<OrganizationsPage />} />
           <Route path="users" element={<UsersPage />} />
+          <Route path="platform-settings" element={<PlatformSettingsPage />} />
+          <Route path="logs-monitoring" element={<LogsMonitoringPage />} />
+          <Route path="global-integrations" element={<GlobalIntegrationsPage />} />
           <Route path="payments" element={<PaymentsPage />} />
-          <Route path="webhooks" element={<WebhooksPage />} />
-          <Route path="server" element={<ServerStatusPage />} />
-          <Route path="audit" element={<AuditPage />} />
+          <Route path="webhooks" element={<Navigate to="/dashboard/logs-monitoring" replace />} />
+          <Route path="server" element={<Navigate to="/dashboard/logs-monitoring" replace />} />
+          <Route path="audit" element={<Navigate to="/dashboard/logs-monitoring" replace />} />
           <Route path="settings" element={<OwnerSettingsPage />} />
         </Route>
         <Route path="*" element={<Navigate to={session ? '/dashboard' : '/login'} replace />} />

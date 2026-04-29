@@ -7,9 +7,14 @@ import type {
   AdminUserDetail,
   AdminUserRow,
   AuditResponse,
+  DashboardAdminUsersResponse,
+  GlobalIntegrationsResponse,
+  LogsMonitoringResponse,
   PaymentsResponse,
   OwnerSettingsResponse,
   ServerResponse,
+  UserPlatformSettings,
+  UserPlatformSettingsResponse,
   WebhooksResponse,
   AdminLiveEvent,
 } from './types';
@@ -66,10 +71,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const adminApi = {
   me() {
-    return request<{ admin: { id: string; email: string | null } }>('/me');
+    return request<{ admin: { id: string; email: string | null; access: OwnerSettingsResponse['access'] } }>('/me');
   },
   getOverview() {
     return request<AdminOverview>('/bootstrap', { cache: 'no-store' });
+  },
+  getLogsMonitoring() {
+    return request<LogsMonitoringResponse>('/logs', { cache: 'no-store' });
+  },
+  getGlobalIntegrations() {
+    return request<GlobalIntegrationsResponse>('/integrations', { cache: 'no-store' });
   },
   getOwnerSettings() {
     return request<OwnerSettingsResponse>('/settings', { cache: 'no-store' });
@@ -83,6 +94,44 @@ export const adminApi = {
   updateOwnerProfilePhoto(payload: { dataUrl: string }) {
     return request<OwnerSettingsResponse>('/settings/profile-photo', {
       method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+  updateOwnerAccount(payload: { loginEmail?: string; newPassword?: string }) {
+    return request<OwnerSettingsResponse>('/settings/account', {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+  getDashboardAdmins() {
+    return request<DashboardAdminUsersResponse>('/admin-users', { cache: 'no-store' });
+  },
+  inviteDashboardAdmin(payload: { email: string; fullName?: string; roleTitle?: string; permissions: string[] }) {
+    return request<DashboardAdminUsersResponse>('/admin-users/invite', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+  updateDashboardAdmin(
+    adminId: string,
+    payload: { fullName?: string; roleTitle?: string; status?: 'active' | 'invited' | 'disabled'; permissions?: string[] },
+  ) {
+    return request<DashboardAdminUsersResponse>(`/admin-users/${encodeURIComponent(adminId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+  removeDashboardAdmin(adminId: string) {
+    return request<DashboardAdminUsersResponse>(`/admin-users/${encodeURIComponent(adminId)}`, {
+      method: 'DELETE',
+    });
+  },
+  getPlatformSettings() {
+    return request<UserPlatformSettingsResponse>('/platform-settings', { cache: 'no-store' });
+  },
+  updatePlatformSettingsSection<K extends keyof UserPlatformSettings>(section: K, payload: UserPlatformSettings[K]) {
+    return request<UserPlatformSettingsResponse>(`/platform-settings/${String(section)}`, {
+      method: 'PATCH',
       body: JSON.stringify(payload),
     });
   },

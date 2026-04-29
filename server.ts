@@ -12,10 +12,32 @@ dotenv.config({ path: path.resolve(__dirname, '.env.local'), override: true });
 
 type JsonRecord = Record<string, unknown>;
 
+type AdminPermissionKey =
+  | 'command_center'
+  | 'organizations'
+  | 'global_users'
+  | 'platform_settings'
+  | 'payments'
+  | 'logs_monitoring'
+  | 'global_integrations'
+  | 'webhooks'
+  | 'server_status'
+  | 'security_audit';
+
+type AdminAccessContext = {
+  rowId: string | null;
+  role: 'primary_owner' | 'admin';
+  status: 'active' | 'invited' | 'disabled';
+  permissions: AdminPermissionKey[];
+  isPrimaryOwner: boolean;
+  source: 'primary_owner' | 'database' | 'legacy_env' | 'development';
+};
+
 type AdminContext = {
   id: string;
   email: string | null;
   user: User;
+  access: AdminAccessContext;
 };
 
 type AdminRequest = Request & {
@@ -55,6 +77,8 @@ const allowedUserIds = new Set(
     .filter(Boolean),
 );
 const ownerProfileBucket = process.env.OWNER_PROFILE_BUCKET || 'owner-admin-profile-pictures';
+const primaryOwnerEmail = (process.env.PRIMARY_OWNER_EMAIL || 'admin@connektly.in').trim().toLowerCase();
+const adminInviteRedirectUrl = process.env.ADMIN_INVITE_REDIRECT_URL || '';
 
 const hasRequiredServerConfig = Boolean(supabaseUrl && supabaseAnonKey && supabaseServiceRoleKey);
 const anonSupabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseAnonKey || 'placeholder-key');
@@ -91,6 +115,11 @@ function nowIso() {
 
 function normalizeString(value: unknown) {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizeEmail(value: unknown) {
+  const email = normalizeString(value)?.toLowerCase();
+  return email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
 }
 
 function normalizeNumber(value: unknown, fallback = 0) {
@@ -158,16 +187,13 @@ async function requireAdmin(req: AdminRequest, res: Response, next: NextFunction
       return;
     }
 
-    const email = data.user.email?.toLowerCase() || null;
-    const allowed =
-      allowedUserIds.has(data.user.id) ||
-      (email ? allowedEmails.has(email) : false) ||
-      (process.env.NODE_ENV !== 'production' && allowedEmails.size === 0 && allowedUserIds.size === 0);
+    const email = normalizeEmail(data.user.email);
+    const access = await getAdminAccessForUser(data.user);
 
-    if (!allowed) {
+    if (!access) {
       res.status(403).json({
         error:
-          'This account is not allowed to use the Admin Control Centre. Add its email to ADMIN_ALLOWED_EMAILS or its ID to ADMIN_ALLOWED_USER_IDS.',
+          `This account is not allowed to use the Admin Control Centre. Ask ${primaryOwnerEmail} to invite this user from Admin Profile > User Management.`,
       });
       return;
     }
@@ -176,6 +202,7 @@ async function requireAdmin(req: AdminRequest, res: Response, next: NextFunction
       id: data.user.id,
       email,
       user: data.user,
+      access,
     };
 
     next();
@@ -268,6 +295,115 @@ const defaultOwnerNotifications = {
   weeklyOpsDigest: false,
 };
 
+const adminPermissionCatalog: Array<{ key: AdminPermissionKey; label: string; description: string }> = [
+  { key: 'command_center', label: 'Overview', description: 'View dashboard overview, health, and realtime operations.' },
+  { key: 'organizations', label: 'Organization Management', description: 'View and manage organizations, plans, suspension, and impersonation.' },
+  { key: 'global_users', label: 'Global Users', description: 'View and manage users across every organization.' },
+  { key: 'platform_settings', label: 'User Platform Settings', description: 'Control pricing, feature flags, limits, API keys, and email templates.' },
+  { key: 'payments', label: 'Payments', description: 'View billing, credit ledger, revenue, and payment activity.' },
+  { key: 'logs_monitoring', label: 'Logs & Monitoring', description: 'View API logs, error logs, webhook logs, delivery logs, server status, and audit history.' },
+  { key: 'global_integrations', label: 'Global Integrations', description: 'View WhatsApp, Instagram, and email service health.' },
+  { key: 'webhooks', label: 'Webhooks Live', description: 'View webhook configuration and realtime webhook activity.' },
+  { key: 'server_status', label: 'Server Status', description: 'View service health, table counts, and backend status.' },
+  { key: 'security_audit', label: 'Security Audit', description: 'View persisted admin audit activity.' },
+];
+
+const allAdminPermissions = adminPermissionCatalog.map((permission) => permission.key);
+
+const defaultPlatformSettings = {
+  pricing_plans: {
+    plans: [
+      {
+        id: 'starter',
+        name: 'Starter',
+        currency: 'INR',
+        monthlyPrice: 999,
+        annualPrice: 9990,
+        credits: 1000,
+        features: ['Shared inbox', 'WhatsApp channel', 'Basic CRM'],
+        isActive: true,
+        isRecommended: false,
+      },
+      {
+        id: 'growth',
+        name: 'Growth',
+        currency: 'INR',
+        monthlyPrice: 2499,
+        annualPrice: 24990,
+        credits: 5000,
+        features: ['Multi-channel inbox', 'Automation', 'Team members', 'Webhooks'],
+        isActive: true,
+        isRecommended: true,
+      },
+      {
+        id: 'scale',
+        name: 'Scale',
+        currency: 'INR',
+        monthlyPrice: 7999,
+        annualPrice: 79990,
+        credits: 20000,
+        features: ['Advanced automation', 'Priority support', 'API access', 'Custom limits'],
+        isActive: true,
+        isRecommended: false,
+      },
+    ],
+  },
+  feature_flags: {
+    flags: [
+      { key: 'whatsapp_inbox', label: 'WhatsApp Inbox', description: 'Enable WhatsApp messaging workflows.', enabled: true },
+      { key: 'instagram_inbox', label: 'Instagram Inbox', description: 'Enable Instagram DM support.', enabled: true },
+      { key: 'messenger_inbox', label: 'Messenger Inbox', description: 'Enable Facebook Messenger support.', enabled: true },
+      { key: 'voice_calls', label: 'Voice Calls', description: 'Enable calling and call logs.', enabled: true },
+      { key: 'email_campaigns', label: 'Email Campaigns', description: 'Enable campaign sending tools.', enabled: true },
+      { key: 'api_access', label: 'API Access', description: 'Enable public API access for integrations.', enabled: false },
+    ],
+    orgOverrides: [],
+  },
+  rate_limits: {
+    default: {
+      messagesPerMinute: 60,
+      apiRequestsPerMinute: 120,
+    },
+    orgOverrides: [],
+  },
+  api_keys: {
+    keys: [
+      { id: 'main-app', name: 'Main App API', scope: 'app.connektly.in', key: '', isActive: true, createdAt: null, updatedAt: null },
+      { id: 'email-provider', name: 'Email Provider', scope: 'transactional_email', key: '', isActive: false, createdAt: null, updatedAt: null },
+    ],
+  },
+  email_templates: {
+    templates: [
+      {
+        id: 'invite_user',
+        name: 'Invite user email',
+        subject: 'You are invited to join {{organization_name}} on Connektly',
+        body: 'Hi {{user_name}},\n\nYou have been invited to join {{organization_name}} on Connektly.\n\nOpen your invite: {{invite_url}}',
+        enabled: true,
+        updatedAt: null,
+      },
+      {
+        id: 'password_reset',
+        name: 'Password reset email',
+        subject: 'Reset your Connektly password',
+        body: 'Hi {{user_name}},\n\nUse this link to reset your password: {{reset_url}}\n\nIf you did not request this, ignore this email.',
+        enabled: true,
+        updatedAt: null,
+      },
+      {
+        id: 'magic_link',
+        name: 'Magic link email',
+        subject: 'Your Connektly login link',
+        body: 'Hi {{user_name}},\n\nUse this secure link to sign in: {{magic_link}}',
+        enabled: true,
+        updatedAt: null,
+      },
+    ],
+  },
+};
+
+type PlatformSettingsSection = keyof typeof defaultPlatformSettings;
+
 function normalizeOwnerNotifications(value: unknown) {
   const incoming = isRecord(value) ? value : {};
   return Object.fromEntries(
@@ -293,6 +429,181 @@ function isMissingRelationError(error: unknown) {
   const code = normalizeString(record.code);
   const message = String(error instanceof Error ? error.message : record.message || error || '').toLowerCase();
   return code === '42P01' || message.includes('could not find the table') || message.includes('does not exist');
+}
+
+function normalizeAdminRole(value: unknown): 'primary_owner' | 'admin' {
+  return value === 'primary_owner' ? 'primary_owner' : 'admin';
+}
+
+function normalizeAdminStatus(value: unknown): 'active' | 'invited' | 'disabled' {
+  return value === 'disabled' || value === 'invited' ? value : 'active';
+}
+
+function normalizeAdminPermissions(value: unknown, role: 'primary_owner' | 'admin') {
+  if (role === 'primary_owner') {
+    return allAdminPermissions;
+  }
+
+  const allowed = new Set(allAdminPermissions);
+  const incoming = Array.isArray(value) ? value : [];
+  return incoming.map((item) => normalizeString(item)).filter((item): item is AdminPermissionKey => Boolean(item && allowed.has(item as AdminPermissionKey)));
+}
+
+function hasAdminPermission(admin: AdminContext | undefined, permission: AdminPermissionKey) {
+  return Boolean(admin?.access.isPrimaryOwner || admin?.access.permissions.includes(permission));
+}
+
+function requireAdminPermission(permission: AdminPermissionKey) {
+  return (req: AdminRequest, res: Response, next: NextFunction) => {
+    if (!hasAdminPermission(req.admin, permission)) {
+      res.status(403).json({ error: 'This admin account does not have access to that dashboard feature.' });
+      return;
+    }
+
+    next();
+  };
+}
+
+function requireAnyAdminPermission(permissions: AdminPermissionKey[]) {
+  return (req: AdminRequest, res: Response, next: NextFunction) => {
+    if (!req.admin?.access.isPrimaryOwner && !permissions.some((permission) => req.admin?.access.permissions.includes(permission))) {
+      res.status(403).json({ error: 'This admin account does not have access to that dashboard feature.' });
+      return;
+    }
+
+    next();
+  };
+}
+
+function requirePrimaryOwner(req: AdminRequest, res: Response, next: NextFunction) {
+  if (!req.admin?.access.isPrimaryOwner) {
+    res.status(403).json({ error: `Only the primary owner (${primaryOwnerEmail}) can manage dashboard admins.` });
+    return;
+  }
+
+  next();
+}
+
+function buildAdminAccessContext(row: JsonRecord, source: AdminAccessContext['source']): AdminAccessContext | null {
+  const role = normalizeAdminRole(row.role);
+  const status = normalizeAdminStatus(row.status);
+  if (status === 'disabled') {
+    return null;
+  }
+
+  return {
+    rowId: normalizeString(row.id),
+    role,
+    status,
+    permissions: normalizeAdminPermissions(row.permissions, role),
+    isPrimaryOwner: role === 'primary_owner',
+    source,
+  };
+}
+
+async function upsertPrimaryOwnerAccess(user: User) {
+  const email = normalizeEmail(user.email);
+  if (!email) {
+    return null;
+  }
+
+  const payload = {
+    auth_user_id: user.id,
+    email,
+    full_name: normalizeString(user.user_metadata?.full_name) || normalizeString(user.user_metadata?.name) || 'Primary Owner',
+    role_title: 'Primary Owner',
+    role: 'primary_owner',
+    status: 'active',
+    permissions: allAdminPermissions,
+    updated_at: nowIso(),
+  };
+
+  const { data, error } = await adminSupabase
+    .from('owner_admin_users')
+    .upsert(payload, { onConflict: 'email' })
+    .select('*')
+    .single();
+
+  if (error) {
+    if (isMissingRelationError(error)) {
+      return {
+        rowId: null,
+        role: 'primary_owner',
+        status: 'active',
+        permissions: allAdminPermissions,
+        isPrimaryOwner: true,
+        source: 'primary_owner',
+      } satisfies AdminAccessContext;
+    }
+    throw error;
+  }
+
+  return buildAdminAccessContext(isRecord(data) ? data : payload, 'primary_owner');
+}
+
+async function getAdminAccessForUser(user: User) {
+  const email = normalizeEmail(user.email);
+  const isPrimaryOwnerEmail = email === primaryOwnerEmail;
+
+  if (isPrimaryOwnerEmail) {
+    return upsertPrimaryOwnerAccess(user);
+  }
+
+  const byUserId = await adminSupabase.from('owner_admin_users').select('*').eq('auth_user_id', user.id).maybeSingle();
+  if (byUserId.error && isMissingRelationError(byUserId.error)) {
+    const legacyAllowed =
+      allowedUserIds.has(user.id) ||
+      (email ? allowedEmails.has(email) : false) ||
+      (process.env.NODE_ENV !== 'production' && allowedEmails.size === 0 && allowedUserIds.size === 0);
+
+    return legacyAllowed
+      ? {
+          rowId: null,
+          role: 'admin',
+          status: 'active',
+          permissions: allAdminPermissions,
+          isPrimaryOwner: false,
+          source: allowedUserIds.has(user.id) || (email && allowedEmails.has(email)) ? 'legacy_env' : 'development',
+        } satisfies AdminAccessContext
+      : null;
+  }
+  if (byUserId.error) {
+    throw byUserId.error;
+  }
+
+  let row = isRecord(byUserId.data) ? byUserId.data : null;
+  if (!row && email) {
+    const byEmail = await adminSupabase.from('owner_admin_users').select('*').eq('email', email).maybeSingle();
+    if (byEmail.error) {
+      throw byEmail.error;
+    }
+    row = isRecord(byEmail.data) ? byEmail.data : null;
+  }
+
+  if (!row) {
+    return null;
+  }
+
+  const updates: JsonRecord = {};
+  if (!normalizeString(row.auth_user_id)) {
+    updates.auth_user_id = user.id;
+  }
+  if (email && normalizeEmail(row.email) !== email) {
+    updates.email = email;
+  }
+  if (normalizeAdminStatus(row.status) === 'invited') {
+    updates.status = 'active';
+  }
+  if (Object.keys(updates).length > 0 && normalizeString(row.id)) {
+    updates.updated_at = nowIso();
+    const { data, error } = await adminSupabase.from('owner_admin_users').update(updates).eq('id', row.id).select('*').single();
+    if (error) {
+      throw error;
+    }
+    row = isRecord(data) ? data : { ...row, ...updates };
+  }
+
+  return buildAdminAccessContext(row, normalizeAdminRole(row.role) === 'primary_owner' ? 'primary_owner' : 'database');
 }
 
 async function getOwnerProfileRow(adminUserId: string) {
@@ -340,6 +651,192 @@ async function upsertOwnerProfile(admin: AdminContext, updates: JsonRecord) {
   }
 
   return { row: isRecord(data) ? data : payload, warning: null };
+}
+
+const platformSettingSections = Object.keys(defaultPlatformSettings) as PlatformSettingsSection[];
+
+function cloneDefaultPlatformSettings() {
+  return JSON.parse(JSON.stringify(defaultPlatformSettings)) as Record<PlatformSettingsSection, any>;
+}
+
+function normalizePlatformSection(value: unknown) {
+  const section = normalizeString(value) as PlatformSettingsSection | null;
+  return section && platformSettingSections.includes(section) ? section : null;
+}
+
+function maskSecret(value: unknown) {
+  const secret = normalizeString(value);
+  if (!secret) return '';
+  if (secret.length <= 8) return '****';
+  return `${secret.slice(0, 4)}****${secret.slice(-4)}`;
+}
+
+function normalizePlatformSettingsSection(section: PlatformSettingsSection, incoming: unknown, current: any) {
+  const value = isRecord(incoming) ? incoming : {};
+  const fallback = cloneDefaultPlatformSettings()[section];
+
+  if (section === 'pricing_plans') {
+    const plans = Array.isArray(value.plans) ? value.plans : fallback.plans;
+    return {
+      plans: plans.map((plan: any) => ({
+        id: normalizeString(plan.id) || normalizeString(plan.name)?.toLowerCase().replace(/[^a-z0-9]+/g, '_') || `plan_${Date.now()}`,
+        name: normalizeString(plan.name) || 'Untitled plan',
+        currency: normalizeString(plan.currency) || 'INR',
+        monthlyPrice: normalizeNumber(plan.monthlyPrice),
+        annualPrice: normalizeNumber(plan.annualPrice),
+        credits: normalizeNumber(plan.credits),
+        features: Array.isArray(plan.features)
+          ? plan.features.map((feature: unknown) => normalizeString(feature)).filter(Boolean)
+          : [],
+        isActive: Boolean(plan.isActive),
+        isRecommended: Boolean(plan.isRecommended),
+      })),
+    };
+  }
+
+  if (section === 'feature_flags') {
+    const flags = Array.isArray(value.flags) ? value.flags : fallback.flags;
+    const orgOverrides = Array.isArray(value.orgOverrides) ? value.orgOverrides : [];
+    return {
+      flags: flags.map((flag: any) => ({
+        key: normalizeString(flag.key) || normalizeString(flag.label)?.toLowerCase().replace(/[^a-z0-9]+/g, '_') || `flag_${Date.now()}`,
+        label: normalizeString(flag.label) || 'Untitled feature',
+        description: normalizeString(flag.description) || '',
+        enabled: Boolean(flag.enabled),
+      })),
+      orgOverrides: orgOverrides
+        .map((override: any) => ({
+          orgId: normalizeString(override.orgId),
+          orgName: normalizeString(override.orgName) || '',
+          flags: isRecord(override.flags) ? override.flags : {},
+        }))
+        .filter((override: any) => override.orgId),
+    };
+  }
+
+  if (section === 'rate_limits') {
+    const defaults = isRecord(value.default) ? value.default : fallback.default;
+    const orgOverrides = Array.isArray(value.orgOverrides) ? value.orgOverrides : [];
+    return {
+      default: {
+        messagesPerMinute: normalizeNumber(defaults.messagesPerMinute, fallback.default.messagesPerMinute),
+        apiRequestsPerMinute: normalizeNumber(defaults.apiRequestsPerMinute, fallback.default.apiRequestsPerMinute),
+      },
+      orgOverrides: orgOverrides
+        .map((override: any) => ({
+          orgId: normalizeString(override.orgId),
+          orgName: normalizeString(override.orgName) || '',
+          messagesPerMinute: normalizeNumber(override.messagesPerMinute, fallback.default.messagesPerMinute),
+          apiRequestsPerMinute: normalizeNumber(override.apiRequestsPerMinute, fallback.default.apiRequestsPerMinute),
+        }))
+        .filter((override: any) => override.orgId),
+    };
+  }
+
+  if (section === 'api_keys') {
+    const currentById = new Map((Array.isArray(current?.keys) ? current.keys : []).map((key: any) => [String(key.id), key]));
+    const keys = Array.isArray(value.keys) ? value.keys : fallback.keys;
+    return {
+      keys: keys.map((apiKey: any) => {
+        const id = normalizeString(apiKey.id) || normalizeString(apiKey.name)?.toLowerCase().replace(/[^a-z0-9]+/g, '_') || `api_key_${Date.now()}`;
+        const existing = (currentById.get(id) || {}) as JsonRecord;
+        const nextSecret = normalizeString(apiKey.key);
+        const previousSecret = normalizeString(existing.key) || '';
+        const secret = nextSecret || previousSecret;
+        const rotated = Boolean(nextSecret && nextSecret !== previousSecret);
+        return {
+          id,
+          name: normalizeString(apiKey.name) || 'Untitled API key',
+          scope: normalizeString(apiKey.scope) || 'general',
+          key: secret,
+          isActive: Boolean(apiKey.isActive),
+          createdAt: normalizeString(existing.createdAt) || normalizeString(apiKey.createdAt) || nowIso(),
+          updatedAt: nowIso(),
+          lastRotatedAt: rotated ? nowIso() : normalizeString(existing.lastRotatedAt) || normalizeString(apiKey.lastRotatedAt),
+        };
+      }),
+    };
+  }
+
+  if (section === 'email_templates') {
+    const templates = Array.isArray(value.templates) ? value.templates : fallback.templates;
+    return {
+      templates: templates.map((template: any) => ({
+        id: normalizeString(template.id) || normalizeString(template.name)?.toLowerCase().replace(/[^a-z0-9]+/g, '_') || `template_${Date.now()}`,
+        name: normalizeString(template.name) || 'Untitled template',
+        subject: normalizeString(template.subject) || '',
+        body: normalizeString(template.body) || '',
+        enabled: Boolean(template.enabled),
+        updatedAt: nowIso(),
+      })),
+    };
+  }
+
+  return value;
+}
+
+function redactPlatformSettingsForAdmin(settings: Record<PlatformSettingsSection, any>) {
+  return {
+    ...settings,
+    api_keys: {
+      keys: (settings.api_keys.keys || []).map((apiKey: any) => ({
+        ...apiKey,
+        key: '',
+        maskedKey: maskSecret(apiKey.key),
+      })),
+    },
+  };
+}
+
+async function loadPlatformSettings() {
+  const settings = cloneDefaultPlatformSettings();
+  const { data, error } = await adminSupabase.from('user_platform_settings').select('*');
+
+  if (error) {
+    if (isMissingRelationError(error)) {
+      return {
+        settings: redactPlatformSettingsForAdmin(settings),
+        rawSettings: settings,
+        warning: 'Apply supabase/admin_dashboard.sql to persist User Platform Settings.',
+      };
+    }
+    throw error;
+  }
+
+  for (const row of asRows(data)) {
+    const section = normalizePlatformSection(row.section);
+    if (section && isRecord(row.settings)) {
+      settings[section] = normalizePlatformSettingsSection(section, row.settings, settings[section]);
+    }
+  }
+
+  return {
+    settings: redactPlatformSettingsForAdmin(settings),
+    rawSettings: settings,
+    warning: null,
+  };
+}
+
+async function savePlatformSettingsSection(admin: AdminContext | undefined, section: PlatformSettingsSection, incoming: unknown) {
+  const current = await loadPlatformSettings();
+  const normalized = normalizePlatformSettingsSection(section, incoming, current.rawSettings[section]);
+  const payload = {
+    section,
+    settings: normalized,
+    updated_by: admin?.id || null,
+    updated_at: nowIso(),
+  };
+
+  const { error } = await adminSupabase.from('user_platform_settings').upsert(payload, { onConflict: 'section' });
+  if (error) {
+    if (isMissingRelationError(error)) {
+      throw new Error('Apply supabase/admin_dashboard.sql before saving User Platform Settings.');
+    }
+    throw error;
+  }
+
+  await recordAdminAudit(admin, 'UPDATE_USER_PLATFORM_SETTINGS', null, { section });
+  return loadPlatformSettings();
 }
 
 async function updateAdminUserMetadata(admin: AdminContext, updates: JsonRecord) {
@@ -409,11 +906,80 @@ function buildOwnerSettings(admin: AdminContext, profile: JsonRecord | null, war
     allowlist: {
       emails: allowedEmails.size,
       userIds: allowedUserIds.size,
-      currentAccountAllowedBy: allowedUserIds.has(admin.id) ? 'user_id' : admin.email && allowedEmails.has(admin.email) ? 'email' : 'development',
+      currentAccountAllowedBy: admin.access.source,
+    },
+    access: {
+      role: admin.access.role,
+      status: admin.access.status,
+      permissions: admin.access.permissions,
+      isPrimaryOwner: admin.access.isPrimaryOwner,
+      canManageAdmins: admin.access.isPrimaryOwner,
+      primaryOwnerEmail,
     },
     warning,
     generatedAt: nowIso(),
   };
+}
+
+function buildAdminUserRow(row: JsonRecord, authUser?: User | null) {
+  const role = normalizeAdminRole(row.role);
+  const status = normalizeAdminStatus(row.status);
+  return {
+    id: normalizeString(row.id) || '',
+    authUserId: normalizeString(row.auth_user_id) || authUser?.id || null,
+    email: normalizeEmail(row.email) || normalizeEmail(authUser?.email) || '',
+    fullName:
+      normalizeString(row.full_name) ||
+      normalizeString(authUser?.user_metadata?.full_name) ||
+      normalizeString(authUser?.user_metadata?.name) ||
+      normalizeEmail(row.email)?.split('@')[0] ||
+      'Admin user',
+    roleTitle: normalizeString(row.role_title) || (role === 'primary_owner' ? 'Primary Owner' : 'Admin'),
+    role,
+    status,
+    permissions: normalizeAdminPermissions(row.permissions, role),
+    isPrimaryOwner: role === 'primary_owner',
+    invitedBy: normalizeString(row.invited_by),
+    invitedAt: normalizeString(row.invited_at),
+    lastAccessAt: normalizeString(row.last_access_at),
+    createdAt: normalizeString(row.created_at),
+    updatedAt: normalizeString(row.updated_at),
+    authCreatedAt: authUser?.created_at || null,
+    lastSignInAt: authUser?.last_sign_in_at || null,
+  };
+}
+
+async function loadDashboardAdmins() {
+  const { data, error } = await adminSupabase.from('owner_admin_users').select('*').order('created_at', { ascending: true });
+  if (error) {
+    if (isMissingRelationError(error)) {
+      return {
+        admins: [] as ReturnType<typeof buildAdminUserRow>[],
+        warning: 'Apply supabase/admin_dashboard.sql to persist dashboard admin access.',
+      };
+    }
+    throw error;
+  }
+
+  const rows = asRows(data);
+  const authUsers = await listAuthUsers().catch(() => [] as User[]);
+  const authById = new Map(authUsers.map((user) => [user.id, user]));
+  const authByEmail = new Map(authUsers.map((user) => [normalizeEmail(user.email), user]).filter(([email]) => Boolean(email)) as Array<[string, User]>);
+
+  return {
+    admins: rows.map((row) => buildAdminUserRow(row, authById.get(String(row.auth_user_id)) || authByEmail.get(String(row.email).toLowerCase()) || null)),
+    warning: null,
+  };
+}
+
+async function findAuthUserByEmail(email: string) {
+  const users = await listAuthUsers();
+  return users.find((user) => normalizeEmail(user.email) === email) || null;
+}
+
+function normalizeInvitePermissions(value: unknown) {
+  const permissions = normalizeAdminPermissions(value, 'admin');
+  return permissions.length > 0 ? permissions : ['command_center'] satisfies AdminPermissionKey[];
 }
 
 function parseProfilePhotoData(dataUrl: unknown) {
@@ -542,6 +1108,164 @@ function normalizePaymentAmount(row: JsonRecord) {
   }
 
   return 0;
+}
+
+function monthStart(offsetFromCurrent: number) {
+  const date = new Date();
+  date.setUTCDate(1);
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCMonth(date.getUTCMonth() + offsetFromCurrent);
+  return date;
+}
+
+function monthKey(date: Date) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthLabel(date: Date) {
+  return date.toLocaleString('en-IN', { month: 'short', year: '2-digit', timeZone: 'UTC' });
+}
+
+function dayStart(offsetFromCurrent: number) {
+  const date = new Date();
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCDate(date.getUTCDate() + offsetFromCurrent);
+  return date;
+}
+
+function dayKey(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function dayLabel(date: Date) {
+  return date.toLocaleString('en-IN', { day: '2-digit', month: 'short', timeZone: 'UTC' });
+}
+
+function timestampFromRow(row: JsonRecord, fallbackKey = 'created_at') {
+  const value = normalizeString(row[fallbackKey]) || normalizeString(row.updated_at) || normalizeString(row.created_at);
+  const timestamp = Date.parse(String(value || ''));
+  return Number.isFinite(timestamp) ? new Date(timestamp) : null;
+}
+
+function planMonthlyValue(row: JsonRecord) {
+  const selectedPlan = String(row.selected_plan || '').toLowerCase();
+  const plan = defaultPlatformSettings.pricing_plans.plans.find((item) => item.id === selectedPlan || item.name.toLowerCase() === selectedPlan);
+  if (!plan) {
+    return 0;
+  }
+
+  const billingCycle = String(row.billing_cycle || '').toLowerCase();
+  return billingCycle.includes('annual') || billingCycle.includes('year') ? plan.annualPrice / 12 : plan.monthlyPrice;
+}
+
+function isChurnedProfile(row: JsonRecord) {
+  const billingStatus = String(row.billing_status || '').toLowerCase();
+  const accountStatus = String(row.status || '').toLowerCase();
+  return ['cancelled', 'canceled', 'deleted', 'churned', 'suspended'].some(
+    (status) => billingStatus.includes(status) || accountStatus.includes(status),
+  );
+}
+
+function isActiveProfile(row: JsonRecord) {
+  const billingStatus = String(row.billing_status || '').toLowerCase();
+  return !isChurnedProfile(row) && ['active', 'paid', 'trial', 'trialing'].some((status) => billingStatus.includes(status));
+}
+
+function isFailedRow(row: JsonRecord) {
+  const value = [
+    row.status,
+    row.delivery_status,
+    row.processing_status,
+    row.error,
+    row.error_message,
+    row.failure_reason,
+    row.payment_status,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return /fail|error|disconnect|timeout|declin|past_due|cancel/.test(value);
+}
+
+function logStatus(row: JsonRecord) {
+  return (
+    normalizeString(row.status) ||
+    normalizeString(row.delivery_status) ||
+    normalizeString(row.processing_status) ||
+    normalizeString(row.payment_status) ||
+    normalizeString(row.state) ||
+    'recorded'
+  );
+}
+
+function logErrorType(row: JsonRecord) {
+  const value = [
+    row.error_type,
+    row.error_code,
+    row.error,
+    row.error_message,
+    row.failure_reason,
+    row.status,
+    row.delivery_status,
+    row.processing_status,
+    row.payment_status,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (!value) return null;
+  if (value.includes('auth') || value.includes('token') || value.includes('permission')) return 'auth';
+  if (value.includes('rate') || value.includes('limit') || value.includes('quota')) return 'rate_limit';
+  if (value.includes('timeout')) return 'timeout';
+  if (value.includes('disconnect')) return 'disconnection';
+  if (value.includes('payment') || value.includes('declin') || value.includes('past_due')) return 'payment';
+  if (value.includes('webhook')) return 'webhook';
+  if (value.includes('fail') || value.includes('error')) return 'error';
+  return null;
+}
+
+function logDetail(row: JsonRecord) {
+  return (
+    normalizeString(row.error_message) ||
+    normalizeString(row.failure_reason) ||
+    normalizeString(row.error) ||
+    normalizeString(row.message) ||
+    normalizeString(row.title) ||
+    null
+  );
+}
+
+function logOccurredAt(row: JsonRecord) {
+  return normalizeString(row.created_at) || normalizeString(row.updated_at) || nowIso();
+}
+
+function buildLogEntry(args: {
+  row: JsonRecord;
+  idPrefix: string;
+  category: 'api' | 'error' | 'webhook' | 'message_delivery';
+  source: string;
+  title: string;
+  fallbackOrgId?: string | null;
+}) {
+  const orgId = rowOwnerUserId(args.row) || normalizeString(args.row.org_id) || normalizeString(args.row.organization_id) || args.fallbackOrgId || null;
+  const status = logStatus(args.row);
+  const errorType = logErrorType(args.row);
+  const failed = isFailedRow(args.row);
+  return {
+    id: normalizeString(args.row.id) || `${args.idPrefix}:${orgId || 'global'}:${logOccurredAt(args.row)}`,
+    occurredAt: logOccurredAt(args.row),
+    orgId,
+    userId: normalizeString(args.row.user_id) || orgId,
+    category: args.category,
+    source: args.source,
+    title: args.title,
+    status,
+    errorType,
+    severity: failed ? 'critical' : 'info',
+    detail: logDetail(args.row),
+    payload: args.row,
+  };
 }
 
 function organizationNameForUser(user: ReturnType<typeof buildUserRows>[number]) {
@@ -689,12 +1413,9 @@ function summarizeHealth(dbLatencyMs: number | null, clientHealth: JsonRecord | 
       detail: supabaseServiceRoleKey ? 'Configured server-side' : 'Missing',
     },
     {
-      label: 'Admin allowlist',
-      ok: allowedEmails.size > 0 || allowedUserIds.size > 0,
-      detail:
-        allowedEmails.size > 0 || allowedUserIds.size > 0
-          ? `${allowedEmails.size} emails, ${allowedUserIds.size} user IDs`
-          : 'Development fallback only',
+      label: 'Primary owner',
+      ok: Boolean(primaryOwnerEmail),
+      detail: primaryOwnerEmail,
     },
     {
       label: 'Client API health URL',
@@ -1122,6 +1843,7 @@ function buildWebhookReferences() {
 }
 
 function buildOverview(core: Awaited<ReturnType<typeof loadCoreData>>, authUsers: User[], health: ReturnType<typeof summarizeHealth>) {
+  const organizations = buildOrganizationRows(core, authUsers);
   const totalCredits = core.creditLedger.reduce((total, row) => {
     const amount = normalizeNumber(row.amount);
     return row.type === 'deduction' ? total - amount : total + amount;
@@ -1129,6 +1851,13 @@ function buildOverview(core: Awaited<ReturnType<typeof loadCoreData>>, authUsers
   const paidProfiles = core.profiles.filter((row) => ['active', 'paid'].includes(String(row.billing_status || '').toLowerCase()));
   const trials = core.profiles.filter((row) => String(row.billing_status || '').toLowerCase().includes('trial'));
   const connectedChannels = core.metaChannels.length + core.instagramChannels.length + core.messengerChannels.length;
+  const churnedProfiles = core.profiles.filter(isChurnedProfile);
+  const activeProfiles = core.profiles.filter(isActiveProfile);
+  const monthlyRecurringRevenue = core.profiles
+    .filter((row) => !isChurnedProfile(row))
+    .reduce((total, row) => total + planMonthlyValue(row), 0);
+  const churnRateDenominator = activeProfiles.length + churnedProfiles.length;
+  const churnRate = churnRateDenominator > 0 ? (churnedProfiles.length / churnRateDenominator) * 100 : 0;
   const activeCalls = core.callSessions.filter((row) => {
     const state = String(row.state || '').toLowerCase();
     return state && !['ended', 'failed', 'rejected', 'timeout'].includes(state);
@@ -1140,22 +1869,127 @@ function buildOverview(core: Awaited<ReturnType<typeof loadCoreData>>, authUsers
     return acc;
   }, {});
 
+  const months = Array.from({ length: 6 }, (_value, index) => monthStart(index - 5));
+  const customerMovement = months.map((date) => {
+    const key = monthKey(date);
+    const newCustomers = core.profiles.filter((row) => {
+      const createdAt = timestampFromRow(row, 'created_at');
+      return createdAt ? monthKey(createdAt) === key : false;
+    }).length;
+    const churnedCustomers = core.profiles.filter((row) => {
+      const updatedAt = timestampFromRow(row, 'updated_at');
+      return isChurnedProfile(row) && updatedAt ? monthKey(updatedAt) === key : false;
+    }).length;
+    return {
+      label: monthLabel(date),
+      newCustomers,
+      churnedCustomers,
+    };
+  });
+
+  const days = Array.from({ length: 7 }, (_value, index) => dayStart(index - 6));
+  const messagesByDay = new Map(days.map((date) => [dayKey(date), 0]));
+  for (const row of core.messages) {
+    const date = timestampFromRow(row);
+    if (!date) continue;
+    const key = dayKey(date);
+    if (messagesByDay.has(key)) {
+      messagesByDay.set(key, (messagesByDay.get(key) || 0) + 1);
+    }
+  }
+
+  const failedApiCalls = [...core.leadEvents, ...core.paymentEvents].filter(isFailedRow).length + (health.clientApi && !health.clientApi.ok ? 1 : 0);
+  const whatsappDisconnections = core.metaChannels.filter((row) => {
+    const status = String(row.status || row.connection_status || '').toLowerCase();
+    return status && !['active', 'connected', 'approved', 'verified'].some((item) => status.includes(item));
+  }).length;
+  const paymentFailures = core.paymentEvents.filter(isFailedRow).length;
+  const totalApiSignals = core.leadEvents.length + core.paymentEvents.length;
+  const highErrorRate = totalApiSignals > 0 ? (failedApiCalls / totalApiSignals) * 100 : 0;
+
   return {
     generatedAt: nowIso(),
     metrics: {
+      totalOrganizations: organizations.length,
+      activeOrganizations: organizations.filter((organization) =>
+        ['active', 'paid', 'trialing', 'trial'].some((status) => String(organization.status || '').toLowerCase().includes(status)),
+      ).length,
       totalUsers: Math.max(authUsers.length, core.profiles.length),
       workspaces: core.profiles.length,
       paidWorkspaces: paidProfiles.length,
       trialWorkspaces: trials.length,
       connectedChannels,
       conversations: core.threads.length,
+      messagesSent: core.messages.length,
       messages24h: core.messages.filter((row) => isRecent(row.created_at, 24)).length,
       calls24h: core.callLogs.filter((row) => isRecent(row.created_at, 24)).length,
       activeCalls: activeCalls.length,
       leadWebhooks24h: core.leadEvents.filter((row) => isRecent(row.created_at, 24)).length,
       emailCampaigns24h: core.emailCampaigns.filter((row) => isRecent(row.created_at, 24)).length,
+      monthlyRecurringRevenue: Math.round(monthlyRecurringRevenue * 100) / 100,
+      churnRate: Math.round(churnRate * 100) / 100,
       totalCreditBalance: Math.round(totalCredits * 100) / 100,
     },
+    charts: {
+      revenueGrowth: months.map((date) => ({
+        label: monthLabel(date),
+        value:
+          Math.round(
+            core.profiles
+              .filter((row) => {
+                const createdAt = timestampFromRow(row, 'created_at');
+                const updatedAt = timestampFromRow(row, 'updated_at');
+                const monthEnd = new Date(date);
+                monthEnd.setUTCMonth(monthEnd.getUTCMonth() + 1);
+                const wasCreated = createdAt ? createdAt < monthEnd : true;
+                const wasChurned = isChurnedProfile(row) && updatedAt ? updatedAt < monthEnd : isChurnedProfile(row);
+                return wasCreated && !wasChurned;
+              })
+              .reduce((total, row) => total + planMonthlyValue(row), 0) * 100,
+          ) / 100,
+      })),
+      customerMovement,
+      messageVolume: days.map((date) => ({
+        label: dayLabel(date),
+        value: messagesByDay.get(dayKey(date)) || 0,
+      })),
+      channelUsage: [
+        { label: 'WhatsApp', value: core.metaChannels.length },
+        { label: 'Instagram', value: core.instagramChannels.length },
+        { label: 'Email', value: Math.max(core.emailConnections.length, core.emailCampaigns.length) },
+      ],
+    },
+    alerts: [
+      {
+        key: 'failed_api_calls',
+        label: 'Failed API calls',
+        value: failedApiCalls,
+        severity: failedApiCalls > 0 ? 'critical' : 'success',
+        detail: health.clientApi && !health.clientApi.ok ? 'Client API health check is failing.' : 'Webhook and API error signals.',
+      },
+      {
+        key: 'whatsapp_disconnections',
+        label: 'WhatsApp disconnections',
+        value: whatsappDisconnections,
+        severity: whatsappDisconnections > 0 ? 'warning' : 'success',
+        detail: 'WhatsApp channels not reporting a connected status.',
+      },
+      {
+        key: 'high_error_rates',
+        label: 'High error rates',
+        value: Math.round(highErrorRate * 100) / 100,
+        suffix: '%',
+        severity: highErrorRate >= 10 ? 'critical' : highErrorRate > 0 ? 'warning' : 'success',
+        detail: `${failedApiCalls} failed signals across ${Math.max(totalApiSignals, 0)} recent webhook/API events.`,
+      },
+      {
+        key: 'payment_failures',
+        label: 'Payment failures',
+        value: paymentFailures,
+        severity: paymentFailures > 0 ? 'critical' : 'success',
+        detail: 'Failed, declined, or past-due payment events.',
+      },
+    ],
     planBreakdown,
     health,
     timeline: buildTimeline(core),
@@ -1176,6 +2010,220 @@ function buildOverview(core: Awaited<ReturnType<typeof loadCoreData>>, authUsers
   };
 }
 
+function sortLogs<T>(logs: T[]) {
+  return logs.sort((left, right) => Date.parse(String((right as any).occurredAt)) - Date.parse(String((left as any).occurredAt)));
+}
+
+function buildLogsMonitoring(core: Awaited<ReturnType<typeof loadCoreData>>, health: ReturnType<typeof summarizeHealth>) {
+  const apiLogs = sortLogs([
+    ...core.leadEvents.map((row) =>
+      buildLogEntry({
+        row,
+        idPrefix: 'lead-api',
+        category: 'api',
+        source: 'Meta Lead API',
+        title: 'Meta lead capture API event',
+      }),
+    ),
+    ...core.paymentEvents.map((row) =>
+      buildLogEntry({
+        row,
+        idPrefix: 'payment-api',
+        category: 'api',
+        source: 'WhatsApp Payments API',
+        title: 'WhatsApp payment API event',
+      }),
+    ),
+    ...core.callSessions.map((row) =>
+      buildLogEntry({
+        row,
+        idPrefix: 'call-api',
+        category: 'api',
+        source: 'Calling API',
+        title: 'Call session API event',
+      }),
+    ),
+  ]).slice(0, 500);
+
+  const webhookLogs = sortLogs([
+    ...core.leadEvents.map((row) =>
+      buildLogEntry({
+        row,
+        idPrefix: 'lead-webhook',
+        category: 'webhook',
+        source: 'Meta Lead Webhook',
+        title: 'Lead webhook event',
+      }),
+    ),
+    ...core.paymentEvents.map((row) =>
+      buildLogEntry({
+        row,
+        idPrefix: 'payment-webhook',
+        category: 'webhook',
+        source: 'WhatsApp Webhook',
+        title: 'Payment webhook event',
+      }),
+    ),
+    ...recentLiveEvents
+      .filter((event) => event.table?.includes('webhook') || event.table === 'conversation_messages' || event.table === 'call_sessions')
+      .map((event) => ({
+        id: event.id,
+        occurredAt: event.occurredAt,
+        orgId: event.userId || null,
+        userId: event.userId || null,
+        category: 'webhook' as const,
+        source: event.source,
+        title: event.title,
+        status: event.status || event.eventType,
+        errorType: event.severity === 'critical' ? 'error' : null,
+        severity: event.severity,
+        detail: event.description || null,
+        payload: event.payload || event,
+      })),
+  ]).slice(0, 500);
+
+  const messageDeliveryLogs = sortLogs(
+    core.messages.map((row) =>
+      buildLogEntry({
+        row,
+        idPrefix: 'message-delivery',
+        category: 'message_delivery',
+        source: 'Messaging',
+        title: `${normalizeString(row.direction) || 'Message'} delivery event`,
+      }),
+    ),
+  ).slice(0, 500);
+
+  const errorLogs = sortLogs([
+    ...apiLogs.filter((log) => log.errorType || log.severity === 'critical').map((log) => ({ ...log, category: 'error' as const })),
+    ...webhookLogs.filter((log) => log.errorType || log.severity === 'critical').map((log) => ({ ...log, category: 'error' as const })),
+    ...messageDeliveryLogs.filter((log) => log.errorType || log.severity === 'critical').map((log) => ({ ...log, category: 'error' as const })),
+    ...core.errors.map((error, index) => ({
+      id: `server-error:${index}:${nowIso()}`,
+      occurredAt: nowIso(),
+      orgId: null,
+      userId: null,
+      category: 'error' as const,
+      source: 'Admin API',
+      title: 'Data load warning',
+      status: 'warning',
+      errorType: 'server',
+      severity: 'warning' as const,
+      detail: error,
+      payload: { error },
+    })),
+    ...(health.clientApi && !health.clientApi.ok
+      ? [
+          {
+            id: `client-api-health:${health.clientApi.checkedAt}`,
+            occurredAt: health.clientApi.checkedAt,
+            orgId: null,
+            userId: null,
+            category: 'error' as const,
+            source: 'Client API health',
+            title: 'Client API health check failed',
+            status: String(health.clientApi.status || 'failed'),
+            errorType: 'api_health',
+            severity: 'critical' as const,
+            detail: health.clientApi.body || 'Client API did not return a healthy response.',
+            payload: health.clientApi,
+          },
+        ]
+      : []),
+  ]).slice(0, 500);
+
+  return {
+    generatedAt: nowIso(),
+    apiLogs,
+    errorLogs,
+    webhookLogs,
+    messageDeliveryLogs,
+    errorTypes: [...new Set(errorLogs.map((log) => log.errorType).filter(Boolean))].sort(),
+  };
+}
+
+function integrationSeverity(total: number, unhealthy: number) {
+  if (total === 0) return 'warning' as const;
+  if (unhealthy === 0) return 'success' as const;
+  return unhealthy >= total ? 'critical' as const : 'warning' as const;
+}
+
+function latestTimestamp(rows: JsonRecord[]) {
+  const timestamps = rows
+    .map((row) => timestampFromRow(row, 'updated_at') || timestampFromRow(row, 'created_at'))
+    .filter((date): date is Date => Boolean(date))
+    .map((date) => date.getTime());
+  return timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null;
+}
+
+function buildGlobalIntegrations(core: Awaited<ReturnType<typeof loadCoreData>>, clientHealth: JsonRecord | null) {
+  const whatsappUnhealthy = core.metaChannels.filter((row) => {
+    const status = String(row.status || row.connection_status || '').toLowerCase();
+    return status && !['active', 'connected', 'approved', 'verified'].some((item) => status.includes(item));
+  }).length;
+  const instagramUnhealthy = core.instagramChannels.filter((row) => {
+    const status = String(row.status || row.connection_status || '').toLowerCase();
+    return status && !['active', 'connected', 'approved', 'verified'].some((item) => status.includes(item));
+  }).length;
+  const emailUnhealthy = core.emailConnections.filter((row) => {
+    const status = String(row.status || row.connection_status || '').toLowerCase();
+    return status && !['active', 'connected', 'verified'].some((item) => status.includes(item));
+  }).length;
+  const failedEmailCampaigns = core.emailCampaigns.filter(isFailedRow).length;
+  const clientApiHealthy = Boolean(clientHealth?.ok);
+
+  return {
+    generatedAt: nowIso(),
+    integrations: [
+      {
+        key: 'whatsapp',
+        label: 'WhatsApp API Health',
+        status: whatsappUnhealthy === 0 && core.metaChannels.length > 0 ? 'healthy' : core.metaChannels.length === 0 ? 'not configured' : 'degraded',
+        severity: integrationSeverity(core.metaChannels.length, whatsappUnhealthy),
+        summary: `${core.metaChannels.length - whatsappUnhealthy}/${core.metaChannels.length} WhatsApp channels healthy`,
+        lastCheckedAt: latestTimestamp(core.metaChannels) || nowIso(),
+        metrics: [
+          { label: 'Channels', value: core.metaChannels.length },
+          { label: 'Disconnected', value: whatsappUnhealthy },
+          { label: 'Webhook events', value: core.paymentEvents.length + core.leadEvents.length },
+        ],
+      },
+      {
+        key: 'instagram',
+        label: 'Instagram API Status',
+        status: instagramUnhealthy === 0 && core.instagramChannels.length > 0 ? 'healthy' : core.instagramChannels.length === 0 ? 'not configured' : 'degraded',
+        severity: integrationSeverity(core.instagramChannels.length, instagramUnhealthy),
+        summary: `${core.instagramChannels.length - instagramUnhealthy}/${core.instagramChannels.length} Instagram channels healthy`,
+        lastCheckedAt: latestTimestamp(core.instagramChannels) || nowIso(),
+        metrics: [
+          { label: 'Channels', value: core.instagramChannels.length },
+          { label: 'Disconnected', value: instagramUnhealthy },
+          { label: 'API health', value: clientApiHealthy ? 1 : 0 },
+        ],
+      },
+      {
+        key: 'email',
+        label: 'Email Service Status',
+        status:
+          emailUnhealthy === 0 && failedEmailCampaigns === 0 && (core.emailConnections.length > 0 || core.emailCampaigns.length > 0)
+            ? 'healthy'
+            : core.emailConnections.length === 0 && core.emailCampaigns.length === 0
+              ? 'not configured'
+              : 'degraded',
+        severity: integrationSeverity(Math.max(core.emailConnections.length + core.emailCampaigns.length, 1), emailUnhealthy + failedEmailCampaigns),
+        summary: `${core.emailCampaigns.length} campaigns, ${failedEmailCampaigns} failed signals`,
+        lastCheckedAt: latestTimestamp([...core.emailConnections, ...core.emailCampaigns]) || nowIso(),
+        metrics: [
+          { label: 'Connections', value: core.emailConnections.length },
+          { label: 'Campaigns', value: core.emailCampaigns.length },
+          { label: 'Failures', value: failedEmailCampaigns },
+        ],
+      },
+    ],
+    clientApi: clientHealth,
+  };
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'connektly-owner-dashboard', uptimeSeconds: Math.round(process.uptime()) });
 });
@@ -1185,6 +2233,7 @@ app.get('/api/admin/me', requireAdmin, (req: AdminRequest, res) => {
     admin: {
       id: req.admin?.id,
       email: req.admin?.email,
+      access: req.admin?.access,
     },
   });
 });
@@ -1302,7 +2351,295 @@ app.post('/api/admin/settings/profile-photo', requireAdmin, async (req: AdminReq
   }
 });
 
-app.get('/api/admin/bootstrap', requireAdmin, async (_req, res) => {
+app.patch('/api/admin/settings/account', requireAdmin, async (req: AdminRequest, res) => {
+  try {
+    const admin = req.admin;
+    if (!admin) {
+      throw new Error('Admin context was not initialized.');
+    }
+
+    const loginEmail = Object.prototype.hasOwnProperty.call(req.body, 'loginEmail') ? normalizeEmail(req.body.loginEmail) : null;
+    const newPassword = normalizeString(req.body.newPassword);
+    const authUpdates: JsonRecord = {};
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'loginEmail')) {
+      if (!loginEmail) {
+        throw new Error('Enter a valid login email.');
+      }
+      authUpdates.email = loginEmail;
+      authUpdates.email_confirm = true;
+    }
+
+    if (newPassword) {
+      if (newPassword.length < 8) {
+        throw new Error('Password must be at least 8 characters.');
+      }
+      authUpdates.password = newPassword;
+    }
+
+    if (Object.keys(authUpdates).length === 0) {
+      throw new Error('Enter a new login email or password to update.');
+    }
+
+    const { data, error } = await adminSupabase.auth.admin.updateUserById(admin.id, authUpdates as any);
+    if (error) {
+      throw error;
+    }
+
+    if (loginEmail) {
+      await upsertOwnerProfile({ ...admin, email: loginEmail }, { email: loginEmail });
+      await adminSupabase
+        .from('owner_admin_users')
+        .update({ email: loginEmail, updated_at: nowIso() })
+        .eq('auth_user_id', admin.id)
+        .then((result) => {
+          if (result.error && !isMissingRelationError(result.error)) {
+            throw result.error;
+          }
+        });
+    }
+
+    await recordAdminAudit(admin, 'UPDATE_OWNER_ACCOUNT', null, {
+      loginEmailChanged: Boolean(loginEmail),
+      passwordChanged: Boolean(newPassword),
+    });
+
+    const { row, warning } = await getOwnerProfileRow(admin.id);
+    res.json(buildOwnerSettings({ ...admin, email: normalizeEmail(data.user?.email) || admin.email, user: data.user || admin.user }, row, warning, data.user || admin.user));
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.get('/api/admin/admin-users', requireAdmin, requirePrimaryOwner, async (_req, res) => {
+  try {
+    const { admins, warning } = await loadDashboardAdmins();
+    res.json({
+      admins,
+      permissions: adminPermissionCatalog,
+      primaryOwnerEmail,
+      warning,
+      generatedAt: nowIso(),
+    });
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.post('/api/admin/admin-users/invite', requireAdmin, requirePrimaryOwner, async (req: AdminRequest, res) => {
+  try {
+    const admin = req.admin;
+    if (!admin) {
+      throw new Error('Admin context was not initialized.');
+    }
+
+    const email = normalizeEmail(req.body.email);
+    if (!email) {
+      throw new Error('Enter a valid email address.');
+    }
+    if (email === primaryOwnerEmail) {
+      throw new Error(`${primaryOwnerEmail} is already the primary owner.`);
+    }
+
+    const fullName = normalizeString(req.body.fullName) || email.split('@')[0];
+    const roleTitle = normalizeString(req.body.roleTitle) || 'Admin';
+    const permissions = normalizeInvitePermissions(req.body.permissions);
+    let authUser = await findAuthUserByEmail(email);
+    let inviteError: string | null = null;
+
+    if (!authUser) {
+      const options: JsonRecord = {
+        data: {
+          full_name: fullName,
+          role_title: roleTitle,
+          invited_by_admin: admin.email,
+        },
+      };
+      if (adminInviteRedirectUrl) {
+        options.redirectTo = adminInviteRedirectUrl;
+      }
+
+      const { data, error } = await (adminSupabase.auth.admin as any).inviteUserByEmail(email, options);
+      if (error) {
+        const message = error.message.toLowerCase();
+        if (!message.includes('already') && !message.includes('registered')) {
+          throw error;
+        }
+        inviteError = error.message;
+        authUser = await findAuthUserByEmail(email);
+      } else {
+        authUser = data?.user || null;
+      }
+    }
+
+    const payload = {
+      auth_user_id: authUser?.id || null,
+      email,
+      full_name: fullName,
+      role_title: roleTitle,
+      role: 'admin',
+      status: authUser ? 'active' : 'invited',
+      permissions,
+      invited_by: admin.id,
+      invited_at: nowIso(),
+      updated_at: nowIso(),
+    };
+
+    const { error } = await adminSupabase.from('owner_admin_users').upsert(payload, { onConflict: 'email' });
+    if (error) {
+      if (isMissingRelationError(error)) {
+        throw new Error('Apply supabase/admin_dashboard.sql before inviting dashboard admins.');
+      }
+      throw error;
+    }
+
+    await recordAdminAudit(admin, 'INVITE_DASHBOARD_ADMIN', authUser?.id || null, { email, permissions });
+    const { admins, warning } = await loadDashboardAdmins();
+    res.json({
+      admins,
+      permissions: adminPermissionCatalog,
+      primaryOwnerEmail,
+      warning: warning || inviteError,
+      generatedAt: nowIso(),
+    });
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.patch('/api/admin/admin-users/:id', requireAdmin, requirePrimaryOwner, async (req: AdminRequest, res) => {
+  try {
+    const admin = req.admin;
+    if (!admin) {
+      throw new Error('Admin context was not initialized.');
+    }
+
+    const id = normalizeString(req.params.id);
+    if (!id) {
+      throw new Error('Admin user id is required.');
+    }
+
+    const { data: existing, error: existingError } = await adminSupabase.from('owner_admin_users').select('*').eq('id', id).maybeSingle();
+    if (existingError) {
+      throw existingError;
+    }
+    if (!isRecord(existing)) {
+      res.status(404).json({ error: 'Dashboard admin not found.' });
+      return;
+    }
+    if (normalizeAdminRole(existing.role) === 'primary_owner') {
+      throw new Error('The primary owner cannot be edited from this list.');
+    }
+
+    const updates: JsonRecord = { updated_at: nowIso() };
+    if (Object.prototype.hasOwnProperty.call(req.body, 'fullName')) {
+      updates.full_name = normalizeString(req.body.fullName) || '';
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'roleTitle')) {
+      updates.role_title = normalizeString(req.body.roleTitle) || 'Admin';
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'status')) {
+      updates.status = normalizeAdminStatus(req.body.status);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'permissions')) {
+      updates.permissions = normalizeInvitePermissions(req.body.permissions);
+    }
+
+    const { error } = await adminSupabase.from('owner_admin_users').update(updates).eq('id', id);
+    if (error) {
+      throw error;
+    }
+
+    await recordAdminAudit(admin, 'UPDATE_DASHBOARD_ADMIN', normalizeString(existing.auth_user_id), { adminRowId: id, updates: Object.keys(updates) });
+    const { admins, warning } = await loadDashboardAdmins();
+    res.json({
+      admins,
+      permissions: adminPermissionCatalog,
+      primaryOwnerEmail,
+      warning,
+      generatedAt: nowIso(),
+    });
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.delete('/api/admin/admin-users/:id', requireAdmin, requirePrimaryOwner, async (req: AdminRequest, res) => {
+  try {
+    const admin = req.admin;
+    if (!admin) {
+      throw new Error('Admin context was not initialized.');
+    }
+
+    const id = normalizeString(req.params.id);
+    if (!id) {
+      throw new Error('Admin user id is required.');
+    }
+
+    const { data: existing, error: existingError } = await adminSupabase.from('owner_admin_users').select('*').eq('id', id).maybeSingle();
+    if (existingError) {
+      throw existingError;
+    }
+    if (!isRecord(existing)) {
+      res.status(404).json({ error: 'Dashboard admin not found.' });
+      return;
+    }
+    if (normalizeAdminRole(existing.role) === 'primary_owner') {
+      throw new Error('The primary owner cannot be removed.');
+    }
+
+    const { error } = await adminSupabase.from('owner_admin_users').delete().eq('id', id);
+    if (error) {
+      throw error;
+    }
+
+    await recordAdminAudit(admin, 'REMOVE_DASHBOARD_ADMIN', normalizeString(existing.auth_user_id), { adminRowId: id });
+    const { admins, warning } = await loadDashboardAdmins();
+    res.json({
+      admins,
+      permissions: adminPermissionCatalog,
+      primaryOwnerEmail,
+      warning,
+      generatedAt: nowIso(),
+    });
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.get('/api/admin/platform-settings', requireAdmin, requireAdminPermission('platform_settings'), async (_req, res) => {
+  try {
+    const settings = await loadPlatformSettings();
+    res.json({
+      settings: settings.settings,
+      warning: settings.warning,
+      generatedAt: nowIso(),
+    });
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.patch('/api/admin/platform-settings/:section', requireAdmin, requireAdminPermission('platform_settings'), async (req: AdminRequest, res) => {
+  try {
+    const section = normalizePlatformSection(req.params.section);
+    if (!section) {
+      res.status(400).json({ error: 'Unsupported platform settings section.' });
+      return;
+    }
+
+    const settings = await savePlatformSettingsSection(req.admin, section, req.body);
+    res.json({
+      settings: settings.settings,
+      warning: settings.warning,
+      generatedAt: nowIso(),
+    });
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.get('/api/admin/bootstrap', requireAdmin, requireAdminPermission('command_center'), async (_req, res) => {
   try {
     startRealtimeBridge();
     const [dbLatencyMs, clientHealth, authUsers, core] = await Promise.all([
@@ -1319,7 +2656,37 @@ app.get('/api/admin/bootstrap', requireAdmin, async (_req, res) => {
   }
 });
 
-app.get('/api/admin/organizations', requireAdmin, async (req, res) => {
+app.get(
+  '/api/admin/logs',
+  requireAdmin,
+  requireAnyAdminPermission(['logs_monitoring', 'webhooks', 'server_status', 'security_audit']),
+  async (_req, res) => {
+    try {
+      const [clientHealth, core] = await Promise.all([
+        checkClientApiHealth(),
+        loadCoreData(),
+      ]);
+      const health = summarizeHealth(null, clientHealth);
+      res.json(buildLogsMonitoring(core, health));
+    } catch (error) {
+      sendError(res, 500, error);
+    }
+  },
+);
+
+app.get('/api/admin/integrations', requireAdmin, requireAdminPermission('global_integrations'), async (_req, res) => {
+  try {
+    const [clientHealth, core] = await Promise.all([
+      checkClientApiHealth(),
+      loadCoreData(),
+    ]);
+    res.json(buildGlobalIntegrations(core, clientHealth));
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.get('/api/admin/organizations', requireAdmin, requireAdminPermission('organizations'), async (req, res) => {
   try {
     const search = String(req.query.q || '').trim().toLowerCase();
     const status = String(req.query.status || 'all').trim().toLowerCase();
@@ -1370,7 +2737,7 @@ app.get('/api/admin/organizations', requireAdmin, async (req, res) => {
   }
 });
 
-app.get('/api/admin/organizations/:orgId', requireAdmin, async (req, res) => {
+app.get('/api/admin/organizations/:orgId', requireAdmin, requireAdminPermission('organizations'), async (req, res) => {
   try {
     const { orgId } = req.params;
     const core = await loadCoreData();
@@ -1386,7 +2753,7 @@ app.get('/api/admin/organizations/:orgId', requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/admin/organizations/:orgId/action', requireAdmin, async (req: AdminRequest, res) => {
+app.post('/api/admin/organizations/:orgId/action', requireAdmin, requireAdminPermission('organizations'), async (req: AdminRequest, res) => {
   try {
     const { orgId } = req.params;
     const action = normalizeString(req.body.action);
@@ -1472,7 +2839,7 @@ app.post('/api/admin/organizations/:orgId/action', requireAdmin, async (req: Adm
   }
 });
 
-app.get('/api/admin/users', requireAdmin, async (req, res) => {
+app.get('/api/admin/users', requireAdmin, requireAdminPermission('global_users'), async (req, res) => {
   try {
     const search = String(req.query.q || '').trim().toLowerCase();
     const status = String(req.query.status || 'all').trim().toLowerCase();
@@ -1516,7 +2883,7 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
   }
 });
 
-app.get('/api/admin/users/:userId', requireAdmin, async (req, res) => {
+app.get('/api/admin/users/:userId', requireAdmin, requireAdminPermission('global_users'), async (req, res) => {
   try {
     const { userId } = req.params;
     const [authUser, profile, metaChannel, instagramChannel, messengerChannel, conversations, messages, calls, callSessions, credits, emailCampaigns, notifications] =
@@ -1572,7 +2939,7 @@ app.get('/api/admin/users/:userId', requireAdmin, async (req, res) => {
   }
 });
 
-app.patch('/api/admin/users/:userId/profile', requireAdmin, async (req: AdminRequest, res) => {
+app.patch('/api/admin/users/:userId/profile', requireAdmin, requireAdminPermission('global_users'), async (req: AdminRequest, res) => {
   try {
     const { userId } = req.params;
     const allowedFields = [
@@ -1619,7 +2986,7 @@ app.patch('/api/admin/users/:userId/profile', requireAdmin, async (req: AdminReq
   }
 });
 
-app.post('/api/admin/users/:userId/credits', requireAdmin, async (req: AdminRequest, res) => {
+app.post('/api/admin/users/:userId/credits', requireAdmin, requireAdminPermission('global_users'), async (req: AdminRequest, res) => {
   try {
     const { userId } = req.params;
     const amount = normalizeNumber(req.body.amount);
@@ -1636,7 +3003,7 @@ app.post('/api/admin/users/:userId/credits', requireAdmin, async (req: AdminRequ
         description,
         type,
         amount,
-        currency: normalizeString(req.body.currency) || 'USD',
+        currency: normalizeString(req.body.currency) || 'INR',
       })
       .select('*')
       .single();
@@ -1663,7 +3030,7 @@ app.post('/api/admin/users/:userId/credits', requireAdmin, async (req: AdminRequ
   }
 });
 
-app.post('/api/admin/users/:userId/notice', requireAdmin, async (req: AdminRequest, res) => {
+app.post('/api/admin/users/:userId/notice', requireAdmin, requireAdminPermission('global_users'), async (req: AdminRequest, res) => {
   try {
     const { userId } = req.params;
     const title = normalizeString(req.body.title);
@@ -1696,7 +3063,7 @@ app.post('/api/admin/users/:userId/notice', requireAdmin, async (req: AdminReque
   }
 });
 
-app.post('/api/admin/users/:userId/auth', requireAdmin, async (req: AdminRequest, res) => {
+app.post('/api/admin/users/:userId/auth', requireAdmin, requireAdminPermission('global_users'), async (req: AdminRequest, res) => {
   try {
     const { userId } = req.params;
     const action = normalizeString(req.body.action);
@@ -1718,7 +3085,7 @@ app.post('/api/admin/users/:userId/auth', requireAdmin, async (req: AdminRequest
   }
 });
 
-app.get('/api/admin/payments', requireAdmin, async (_req, res) => {
+app.get('/api/admin/payments', requireAdmin, requireAdminPermission('payments'), async (_req, res) => {
   try {
     const [profiles, creditLedger, paymentEvents] = await Promise.all([
       safeSelect('app_profiles', '*', (query: any) => query.order('updated_at', { ascending: false }).limit(1000)),
@@ -1772,7 +3139,7 @@ app.get('/api/admin/payments', requireAdmin, async (_req, res) => {
   }
 });
 
-app.get('/api/admin/webhooks', requireAdmin, async (_req, res) => {
+app.get('/api/admin/webhooks', requireAdmin, requireAdminPermission('webhooks'), async (_req, res) => {
   try {
     const [leadConfigs, leadEvents, paymentEvents, messengerChannels, messages, calls] = await Promise.all([
       safeSelect('meta_lead_capture_configs', '*', (query: any) => query.order('updated_at', { ascending: false }).limit(200)),
@@ -1816,7 +3183,7 @@ app.get('/api/admin/webhooks', requireAdmin, async (_req, res) => {
   }
 });
 
-app.get('/api/admin/server', requireAdmin, async (_req, res) => {
+app.get('/api/admin/server', requireAdmin, requireAdminPermission('server_status'), async (_req, res) => {
   try {
     const [dbLatencyMs, clientHealth, tableCounts] = await Promise.all([
       checkDbLatency().catch(() => null),
@@ -1846,7 +3213,7 @@ app.get('/api/admin/server', requireAdmin, async (_req, res) => {
   }
 });
 
-app.get('/api/admin/audit', requireAdmin, async (_req, res) => {
+app.get('/api/admin/audit', requireAdmin, requireAdminPermission('security_audit'), async (_req, res) => {
   try {
     const audit = await safeSelect('owner_admin_audit_events', '*', (query: any) =>
       query.order('created_at', { ascending: false }).limit(200),
