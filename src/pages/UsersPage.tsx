@@ -2,17 +2,19 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Ban,
   BellPlus,
+  Building2,
   CheckCircle2,
   CreditCard,
   Loader2,
   RefreshCcw,
   Search,
   Send,
+  ShieldAlert,
   UserCog,
   Users,
 } from 'lucide-react';
 import { adminApi } from '../lib/adminApi';
-import type { AdminUserDetail, AdminUserRow } from '../lib/types';
+import type { AdminOrganizationRow, AdminUserDetail, AdminUserRow } from '../lib/types';
 import { formatDateTime, formatNumber, labelize } from '../lib/format';
 import MetricCard from '../components/MetricCard';
 import Panel from '../components/Panel';
@@ -31,12 +33,29 @@ function getSelectedTitle(user: AdminUserRow | undefined) {
   return user.companyName || user.fullName || user.email || compactId(user.userId);
 }
 
+function getUserRiskFlags(user: AdminUserRow) {
+  const billingStatus = String(user.billingStatus || '').toLowerCase();
+  const plan = String(user.selectedPlan || '').toLowerCase();
+  const activity = user.counts.conversations + user.counts.calls + user.counts.emailCampaigns;
+  const flags = [
+    user.isBanned ? 'Banned' : null,
+    ['past_due', 'suspended', 'cancelled'].includes(billingStatus) ? 'Billing risk' : null,
+    ['free', 'trialing', 'none', ''].includes(plan) && activity > 100 ? 'High unpaid usage' : null,
+    user.channels.length === 0 && user.counts.conversations > 10 ? 'No channels with chat activity' : null,
+    user.counts.emailCampaigns > 50 ? 'Bulk email volume' : null,
+  ];
+
+  return flags.filter(Boolean) as string[];
+}
+
 export default function UsersPage() {
   const [users, setUsers] = useState<AdminUserRow[]>([]);
+  const [organizations, setOrganizations] = useState<AdminOrganizationRow[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [detail, setDetail] = useState<AdminUserDetail | null>(null);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
+  const [orgFilter, setOrgFilter] = useState('all');
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -53,7 +72,7 @@ export default function UsersPage() {
   const [creditForm, setCreditForm] = useState({
     type: 'addition' as 'addition' | 'deduction',
     amount: '100',
-    description: 'Owner dashboard credit adjustment',
+    description: 'Admin credit adjustment',
     notifyUser: true,
   });
   const [noticeForm, setNoticeForm] = useState({
@@ -66,7 +85,7 @@ export default function UsersPage() {
     try {
       setError(null);
       setIsLoading(true);
-      const response = await adminApi.getUsers({ q: search, status });
+      const response = await adminApi.getUsers({ q: search, status, orgId: orgFilter });
       setUsers(response.users);
       setSelectedUserId((current) =>
         response.users.some((user) => user.userId === current)
@@ -77,6 +96,15 @@ export default function UsersPage() {
       setError(error instanceof Error ? error.message : 'Failed to load users.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const loadOrganizations = async () => {
+    try {
+      const response = await adminApi.getOrganizations();
+      setOrganizations(response.organizations);
+    } catch {
+      setOrganizations([]);
     }
   };
 
@@ -103,7 +131,7 @@ export default function UsersPage() {
   };
 
   useEffect(() => {
-    void loadUsers();
+    void Promise.all([loadOrganizations(), loadUsers()]);
   }, []);
 
   useEffect(() => {
@@ -120,10 +148,12 @@ export default function UsersPage() {
       paid: users.filter((user) => String(user.billingStatus || '').toLowerCase() === 'active').length,
       banned: users.filter((user) => user.isBanned).length,
       connected: users.reduce((total, user) => total + user.channels.length, 0),
+      risk: users.filter((user) => getUserRiskFlags(user).length > 0).length,
     };
   }, [users]);
 
   const selectedRow = users.find((user) => user.userId === selectedUserId);
+  const riskUsers = users.filter((user) => getUserRiskFlags(user).length > 0).slice(0, 6);
 
   const saveBilling = async () => {
     if (!selectedUserId) return;
@@ -194,16 +224,12 @@ export default function UsersPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <section className="rounded-[28px] border border-gray-200 bg-white p-6 shadow-sm">
+      <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#dcd6ff] bg-[#f5f3ff] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[#5b45ff]">
-              <Users className="h-3.5 w-3.5" />
-              Workspace users
-            </div>
-            <h1 className="mt-4 text-3xl font-bold tracking-tight text-gray-950">Manage users</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Global Users</h1>
             <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-500">
-              Review accounts, plans, connected channels, CRM activity, credits, and client dashboard notices.
+              View all users across organizations, filter by org, and review abuse or spam risk signals.
             </p>
           </div>
           <button
@@ -220,17 +246,46 @@ export default function UsersPage() {
       {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Loaded users" value={formatNumber(summary.total)} detail="Filtered by current search" Icon={Users} tone="violet" />
+        <MetricCard label="Global users" value={formatNumber(summary.total)} detail="Filtered by current search and org" Icon={Users} tone="violet" />
         <MetricCard label="Active billing" value={formatNumber(summary.paid)} detail="Profiles marked active" Icon={CreditCard} tone="emerald" />
-        <MetricCard label="Connected channels" value={formatNumber(summary.connected)} detail="Across loaded users" Icon={CheckCircle2} tone="sky" />
-        <MetricCard label="Banned users" value={formatNumber(summary.banned)} detail="Supabase Auth ban state" Icon={Ban} tone={summary.banned ? 'rose' : 'slate'} />
+        <MetricCard label="Organizations" value={formatNumber(organizations.length)} detail="Available organization filters" Icon={Building2} tone="sky" />
+        <MetricCard label="Risk flags" value={formatNumber(summary.risk)} detail={`${formatNumber(summary.banned)} banned users`} Icon={ShieldAlert} tone={summary.risk ? 'amber' : 'slate'} />
       </div>
 
+      <Panel title="Abuse and spam detection" description="Heuristic review based on billing state, channel setup, usage volume, and ban state.">
+        {riskUsers.length ? (
+          <div className="grid gap-3 lg:grid-cols-2">
+            {riskUsers.map((user) => (
+              <div key={user.userId} className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-gray-950">{user.fullName}</p>
+                    <p className="mt-1 truncate text-xs text-gray-600">{user.companyName || user.email || user.userId}</p>
+                  </div>
+                  <StatusBadge status={user.isBanned ? 'banned' : user.billingStatus || 'review'} severity={user.isBanned ? 'critical' : 'warning'} compact />
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {getUserRiskFlags(user).map((flag) => (
+                    <span key={`${user.userId}-${flag}`} className="rounded-full border border-amber-200 bg-white px-2 py-1 text-[11px] font-semibold text-amber-800">
+                      {flag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            No abuse or spam risk flags detected in the current user set.
+          </div>
+        )}
+      </Panel>
+
       <Panel
-        title="User directory"
-        description="Click a row to open the user detail and owner actions below."
+        title="Global user directory"
+        description="Click a row to open user detail, billing controls, credits, notices, and auth actions."
         action={
-          <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="flex flex-col gap-2 lg:flex-row">
             <div className="flex items-center rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2">
               <Search className="h-4 w-4 text-gray-400" />
               <input
@@ -240,7 +295,7 @@ export default function UsersPage() {
                   if (event.key === 'Enter') void loadUsers();
                 }}
                 className="ml-2 w-56 bg-transparent text-sm outline-none"
-                placeholder="Search users"
+                placeholder="Search users or orgs"
               />
             </div>
             <select
@@ -252,6 +307,18 @@ export default function UsersPage() {
               {billingStatuses.map((item) => (
                 <option key={item} value={item}>
                   {labelize(item)}
+                </option>
+              ))}
+            </select>
+            <select
+              value={orgFilter}
+              onChange={(event) => setOrgFilter(event.target.value)}
+              className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none"
+            >
+              <option value="all">All orgs</option>
+              {organizations.map((organization) => (
+                <option key={organization.orgId} value={organization.orgId}>
+                  {organization.orgName}
                 </option>
               ))}
             </select>
@@ -278,12 +345,13 @@ export default function UsersPage() {
             <table className="min-w-[1120px] w-full border-collapse text-left text-sm">
               <thead className="bg-gray-50 text-xs uppercase tracking-[0.16em] text-gray-500">
                 <tr>
-                  <th className="px-4 py-3 font-semibold">Workspace</th>
-                  <th className="px-4 py-3 font-semibold">Owner</th>
+                  <th className="px-4 py-3 font-semibold">User</th>
+                  <th className="px-4 py-3 font-semibold">Organization</th>
                   <th className="px-4 py-3 font-semibold">Billing</th>
                   <th className="px-4 py-3 font-semibold">Channels</th>
                   <th className="px-4 py-3 font-semibold">Activity</th>
                   <th className="px-4 py-3 font-semibold">Credits</th>
+                  <th className="px-4 py-3 font-semibold">Risk</th>
                   <th className="px-4 py-3 font-semibold">Last sign in</th>
                   <th className="px-4 py-3 font-semibold">State</th>
                 </tr>
@@ -291,6 +359,7 @@ export default function UsersPage() {
               <tbody className="divide-y divide-gray-100 bg-white">
                 {users.map((user) => {
                   const selected = selectedUserId === user.userId;
+                  const riskFlags = getUserRiskFlags(user);
 
                   return (
                     <tr
@@ -309,14 +378,14 @@ export default function UsersPage() {
                     >
                       <td className="px-4 py-4">
                         <div className="min-w-0">
-                          <p className="max-w-[260px] truncate font-semibold text-gray-950">{user.companyName || user.fullName}</p>
-                          <p className="mt-1 max-w-[260px] truncate text-xs text-gray-500">{user.phone || 'No phone on profile'}</p>
+                          <p className="max-w-[260px] truncate font-semibold text-gray-950">{user.fullName}</p>
+                          <p className="mt-1 max-w-[260px] truncate text-xs text-gray-500">{user.email || 'No email'}</p>
                         </div>
                       </td>
                       <td className="px-4 py-4">
                         <div className="min-w-0">
-                          <p className="max-w-[240px] truncate text-sm font-medium text-gray-800">{user.email || 'No email'}</p>
-                          <p className="mt-1 font-mono text-xs text-gray-400">{compactId(user.userId)}</p>
+                          <p className="max-w-[240px] truncate text-sm font-medium text-gray-800">{user.companyName || 'No organization'}</p>
+                          <p className="mt-1 text-xs text-gray-500">{user.phone || compactId(user.userId)}</p>
                         </div>
                       </td>
                       <td className="px-4 py-4">
@@ -361,6 +430,20 @@ export default function UsersPage() {
                       </td>
                       <td className="px-4 py-4">
                         <span className="font-semibold text-gray-950">{formatNumber(user.totalCredits)}</span>
+                      </td>
+                      <td className="px-4 py-4">
+                        {riskFlags.length ? (
+                          <div className="flex max-w-[220px] flex-wrap gap-1.5">
+                            {riskFlags.slice(0, 2).map((flag) => (
+                              <span key={`${user.userId}-${flag}`} className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-800">
+                                {flag}
+                              </span>
+                            ))}
+                            {riskFlags.length > 2 ? <span className="text-xs text-gray-500">+{riskFlags.length - 2}</span> : null}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">Clear</span>
+                        )}
                       </td>
                       <td className="px-4 py-4 text-xs text-gray-500">{formatDateTime(user.lastSignInAt)}</td>
                       <td className="px-4 py-4">

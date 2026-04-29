@@ -10,6 +10,7 @@ import AdminLayout from './components/AdminLayout';
 import BrandMark from './components/BrandMark';
 import TurnstileWidget from './components/TurnstileWidget';
 import CommandCenter from './pages/CommandCenter';
+import OrganizationsPage from './pages/OrganizationsPage';
 import UsersPage from './pages/UsersPage';
 import PaymentsPage from './pages/PaymentsPage';
 import WebhooksPage from './pages/WebhooksPage';
@@ -32,7 +33,7 @@ function SetupRequired() {
         <div className="flex items-center gap-3">
           <BrandMark className="h-10 w-10" />
           <div>
-            <h1 className="text-xl font-bold">Connektly Owner Dashboard</h1>
+            <h1 className="text-xl font-bold">Connektly Admin Control Centre</h1>
             <p className="text-sm text-gray-400">Environment setup required</p>
           </div>
         </div>
@@ -113,7 +114,7 @@ function LoginPage() {
             <BrandMark className="h-9 w-9" />
             <div>
               <p className="text-lg font-bold text-gray-950">Connektly</p>
-              <p className="text-xs text-gray-500">Owner dashboard</p>
+              <p className="text-xs text-gray-500">Admin Control Centre</p>
             </div>
           </div>
 
@@ -177,6 +178,7 @@ function LoginPage() {
 
 function ProtectedAdmin({ session, children }: { session: Session | null; children: (email: string | null) => ReactNode }) {
   const location = useLocation();
+  const sessionUserId = session?.user.id ?? null;
   const [adminEmail, setAdminEmail] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -185,7 +187,9 @@ function ProtectedAdmin({ session, children }: { session: Session | null; childr
     let cancelled = false;
 
     const check = async () => {
-      if (!session) {
+      if (!sessionUserId) {
+        setAdminEmail(null);
+        setError(null);
         setIsChecking(false);
         return;
       }
@@ -216,7 +220,7 @@ function ProtectedAdmin({ session, children }: { session: Session | null; childr
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [sessionUserId]);
 
   if (!session) {
     return <Navigate to="/login" state={{ from: location }} replace />;
@@ -248,24 +252,42 @@ function ProtectedAdmin({ session, children }: { session: Session | null; childr
   return <>{children(adminEmail)}</>;
 }
 
+function isSameSession(left: Session | null, right: Session | null) {
+  return (
+    left?.user.id === right?.user.id &&
+    left?.access_token === right?.access_token &&
+    left?.expires_at === right?.expires_at
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const applySession = (nextSession: Session | null) => {
+      setSession((currentSession) => (isSameSession(currentSession, nextSession) ? currentSession : nextSession));
+    };
+
     getCachedSession().then((session) => {
-      setSession(session);
+      if (cancelled) return;
+      applySession(session);
       setIsLoading(false);
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
+      applySession(session);
       setIsLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   if (!hasSupabaseConfig()) {
@@ -293,6 +315,7 @@ export default function App() {
           }
         >
           <Route index element={<CommandCenter />} />
+          <Route path="organizations" element={<OrganizationsPage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="payments" element={<PaymentsPage />} />
           <Route path="webhooks" element={<WebhooksPage />} />

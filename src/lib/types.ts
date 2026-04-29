@@ -90,6 +90,70 @@ export type AdminOverview = {
   warnings: string[];
 };
 
+export type AdminOrganizationRow = {
+  orgId: string;
+  orgName: string;
+  ownerUserId: string;
+  ownerName: string;
+  ownerEmail: string | null;
+  plan: string;
+  billingCycle: string | null;
+  userCount: number;
+  status: string;
+  revenue: number;
+  createdAt: string | null;
+  updatedAt: string | null;
+  isBanned: boolean;
+  channels: Array<{ type: string; status: unknown }>;
+  usage: {
+    conversations: number;
+    messages: number;
+    calls: number;
+    emailCampaigns: number;
+    webhookEvents: number;
+    apiUsage: number;
+    creditBalance: number;
+  };
+  riskFlags: string[];
+};
+
+export type AdminOrganizationsResponse = {
+  organizations: AdminOrganizationRow[];
+  summary: {
+    total: number;
+    active: number;
+    suspended: number;
+    revenue: number;
+    risk: number;
+  };
+  generatedAt: string;
+};
+
+export type AdminOrganizationDetail = {
+  organization: AdminOrganizationRow;
+  members: AdminUserRow[];
+  usageStats: {
+    conversations: number;
+    messages: number;
+    callLogs: number;
+    callSessions: number;
+    emailCampaigns: number;
+    webhookEvents: number;
+    apiUsage: number;
+  };
+  billingHistory: Array<{
+    id: string;
+    type: string;
+    title: string;
+    amount: number;
+    status: string;
+    createdAt: string | null;
+    reference: string | null;
+  }>;
+  recentEvents: AdminLiveEvent[];
+  generatedAt: string;
+};
+
 export type OwnerNotificationPreferences = {
   liveEventSound: boolean;
   criticalWebhookAlerts: boolean;

@@ -2,6 +2,8 @@ import { clientConfig } from './config';
 import { getCachedSession } from './supabase';
 import type {
   AdminOverview,
+  AdminOrganizationDetail,
+  AdminOrganizationsResponse,
   AdminUserDetail,
   AdminUserRow,
   AuditResponse,
@@ -84,10 +86,40 @@ export const adminApi = {
       body: JSON.stringify(payload),
     });
   },
-  getUsers(params?: { q?: string; status?: string }) {
+  getOrganizations(params?: { q?: string; status?: string; plan?: string }) {
     const query = new URLSearchParams();
     if (params?.q) query.set('q', params.q);
     if (params?.status && params.status !== 'all') query.set('status', params.status);
+    if (params?.plan && params.plan !== 'all') query.set('plan', params.plan);
+    const suffix = query.size ? `?${query.toString()}` : '';
+    return request<AdminOrganizationsResponse>(`/organizations${suffix}`, { cache: 'no-store' });
+  },
+  getOrganization(orgId: string) {
+    return request<AdminOrganizationDetail>(`/organizations/${encodeURIComponent(orgId)}`, { cache: 'no-store' });
+  },
+  runOrganizationAction(
+    orgId: string,
+    payload: {
+      action: 'suspend' | 'activate' | 'delete' | 'ban' | 'unban' | 'update_plan' | 'impersonate';
+      selectedPlan?: string;
+      billingCycle?: string;
+      billingStatus?: string;
+      duration?: string;
+    },
+  ) {
+    return request<{ detail: AdminOrganizationDetail | null; impersonation: { email: string; actionLink: string | null } | null }>(
+      `/organizations/${encodeURIComponent(orgId)}/action`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    );
+  },
+  getUsers(params?: { q?: string; status?: string; orgId?: string }) {
+    const query = new URLSearchParams();
+    if (params?.q) query.set('q', params.q);
+    if (params?.status && params.status !== 'all') query.set('status', params.status);
+    if (params?.orgId && params.orgId !== 'all') query.set('orgId', params.orgId);
     const suffix = query.size ? `?${query.toString()}` : '';
     return request<{ users: AdminUserRow[]; generatedAt: string }>(`/users${suffix}`, {
       cache: 'no-store',

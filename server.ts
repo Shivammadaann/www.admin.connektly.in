@@ -167,7 +167,7 @@ async function requireAdmin(req: AdminRequest, res: Response, next: NextFunction
     if (!allowed) {
       res.status(403).json({
         error:
-          'This account is not allowed to use the owner dashboard. Add its email to ADMIN_ALLOWED_EMAILS or its ID to ADMIN_ALLOWED_USER_IDS.',
+          'This account is not allowed to use the Admin Control Centre. Add its email to ADMIN_ALLOWED_EMAILS or its ID to ADMIN_ALLOWED_USER_IDS.',
       });
       return;
     }
@@ -513,6 +513,172 @@ function buildUserRows(args: {
   });
 }
 
+function rowOwnerUserId(row: JsonRecord) {
+  return (
+    normalizeString(row.user_id) ||
+    normalizeString(row.workspace_owner_user_id) ||
+    normalizeString(row.owner_user_id)
+  );
+}
+
+function normalizePlanRank(plan: unknown) {
+  const value = String(plan || '').toLowerCase();
+  const rank = ['free', 'starter', 'growth', 'scale', 'enterprise'];
+  const index = rank.indexOf(value);
+  return index === -1 ? 0 : index;
+}
+
+function normalizePaymentAmount(row: JsonRecord) {
+  const amountKeys = ['amount_paid', 'amount_total', 'total_amount', 'amount', 'price'];
+  for (const key of amountKeys) {
+    const raw = row[key];
+    if (raw === null || raw === undefined || raw === '') continue;
+
+    const numeric = normalizeNumber(raw);
+    if (!numeric) continue;
+
+    const looksLikeMinorUnit = key.includes('amount') && numeric >= 1000;
+    return looksLikeMinorUnit ? numeric / 100 : numeric;
+  }
+
+  return 0;
+}
+
+function organizationNameForUser(user: ReturnType<typeof buildUserRows>[number]) {
+  return user.companyName || user.fullName || user.email || `Organization ${user.userId.slice(0, 8)}`;
+}
+
+function buildOrganizationRows(core: Awaited<ReturnType<typeof loadCoreData>>, authUsers: User[]) {
+  const users = buildUserRows({
+    authUsers,
+    profiles: core.profiles,
+    metaChannels: core.metaChannels,
+    instagramChannels: core.instagramChannels,
+    messengerChannels: core.messengerChannels,
+    threads: core.threads,
+    calls: core.callLogs,
+    emailCampaigns: core.emailCampaigns,
+    creditLedger: core.creditLedger,
+  });
+
+  return users.map((user) => {
+    const ownerUserId = user.userId;
+    const ownerMatches = (row: JsonRecord) => rowOwnerUserId(row) === ownerUserId;
+    const messages = core.messages.filter(ownerMatches);
+    const threads = core.threads.filter(ownerMatches);
+    const callLogs = core.callLogs.filter(ownerMatches);
+    const callSessions = core.callSessions.filter(ownerMatches);
+    const emailCampaigns = core.emailCampaigns.filter(ownerMatches);
+    const leadEvents = core.leadEvents.filter(ownerMatches);
+    const paymentEvents = core.paymentEvents.filter(ownerMatches);
+    const creditLedger = core.creditLedger.filter(ownerMatches);
+    const billingStatus = String(user.billingStatus || '').toLowerCase();
+    const plan = user.selectedPlan || 'none';
+    const revenue = paymentEvents.reduce((total, row) => total + normalizePaymentAmount(row), 0);
+    const unpaidHighUsage =
+      ['free', 'trialing', 'none', ''].includes(String(plan).toLowerCase()) &&
+      (messages.length > 500 || threads.length > 100 || callLogs.length > 100 || emailCampaigns.length > 50);
+    const failedWebhooks = leadEvents.filter((row) => /fail|error/i.test(String(row.status || row.delivery_status || ''))).length;
+    const riskFlags = [
+      user.isBanned ? 'Owner banned' : null,
+      ['past_due', 'suspended', 'cancelled', 'deleted'].includes(billingStatus) ? 'Billing/action restricted' : null,
+      unpaidHighUsage ? 'High usage on unpaid plan' : null,
+      failedWebhooks > 5 ? 'Webhook failures' : null,
+    ].filter(Boolean) as string[];
+
+    return {
+      orgId: ownerUserId,
+      orgName: organizationNameForUser(user),
+      ownerUserId,
+      ownerName: user.fullName,
+      ownerEmail: user.email,
+      plan,
+      billingCycle: user.billingCycle || null,
+      userCount: 1,
+      status: user.isBanned ? 'banned' : user.billingStatus || (user.onboardingCompleted ? 'active' : 'setup'),
+      revenue: Math.round(revenue * 100) / 100,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+      isBanned: user.isBanned,
+      channels: user.channels,
+      usage: {
+        conversations: threads.length,
+        messages: messages.length,
+        calls: callLogs.length + callSessions.length,
+        emailCampaigns: emailCampaigns.length,
+        webhookEvents: leadEvents.length + paymentEvents.length,
+        apiUsage: messages.length + callSessions.length + leadEvents.length + paymentEvents.length,
+        creditBalance: user.totalCredits,
+      },
+      riskFlags,
+    };
+  });
+}
+
+function buildOrganizationDetail(core: Awaited<ReturnType<typeof loadCoreData>>, authUsers: User[], orgId: string) {
+  const organizations = buildOrganizationRows(core, authUsers);
+  const organization = organizations.find((item) => item.orgId === orgId);
+  if (!organization) {
+    return null;
+  }
+
+  const ownerMatches = (row: JsonRecord) => rowOwnerUserId(row) === orgId;
+  const users = buildUserRows({
+    authUsers,
+    profiles: core.profiles,
+    metaChannels: core.metaChannels,
+    instagramChannels: core.instagramChannels,
+    messengerChannels: core.messengerChannels,
+    threads: core.threads,
+    calls: core.callLogs,
+    emailCampaigns: core.emailCampaigns,
+    creditLedger: core.creditLedger,
+  }).filter((user) => user.userId === orgId);
+  const billingHistory = [
+    ...core.paymentEvents.filter(ownerMatches).map((row) => ({
+      id: String(row.id || `payment-${row.created_at || Math.random()}`),
+      type: 'payment',
+      title: normalizeString(row.event_type) || normalizeString(row.status) || 'Payment event',
+      amount: Math.round(normalizePaymentAmount(row) * 100) / 100,
+      status: normalizeString(row.status) || 'recorded',
+      createdAt: normalizeString(row.created_at) || normalizeString(row.updated_at),
+      reference: normalizeString(row.razorpay_payment_id) || normalizeString(row.provider_payment_id) || normalizeString(row.id),
+    })),
+    ...core.creditLedger.filter(ownerMatches).map((row) => ({
+      id: String(row.id || `credit-${row.created_at || Math.random()}`),
+      type: 'credit',
+      title: normalizeString(row.description) || 'Credit ledger entry',
+      amount: normalizeNumber(row.amount) * (row.type === 'deduction' ? -1 : 1),
+      status: normalizeString(row.type) || 'ledger',
+      createdAt: normalizeString(row.created_at),
+      reference: normalizeString(row.id),
+    })),
+  ].sort((left, right) => Date.parse(String(right.createdAt || 0)) - Date.parse(String(left.createdAt || 0)));
+
+  const recentEvents = buildTimeline(core).filter((event) => event.userId === orgId).slice(0, 20);
+
+  return {
+    organization,
+    members: users,
+    usageStats: {
+      conversations: core.threads.filter(ownerMatches).length,
+      messages: core.messages.filter(ownerMatches).length,
+      callLogs: core.callLogs.filter(ownerMatches).length,
+      callSessions: core.callSessions.filter(ownerMatches).length,
+      emailCampaigns: core.emailCampaigns.filter(ownerMatches).length,
+      webhookEvents: core.leadEvents.filter(ownerMatches).length + core.paymentEvents.filter(ownerMatches).length,
+      apiUsage:
+        core.messages.filter(ownerMatches).length +
+        core.callSessions.filter(ownerMatches).length +
+        core.leadEvents.filter(ownerMatches).length +
+        core.paymentEvents.filter(ownerMatches).length,
+    },
+    billingHistory: billingHistory.slice(0, 80),
+    recentEvents,
+    generatedAt: nowIso(),
+  };
+}
+
 function summarizeHealth(dbLatencyMs: number | null, clientHealth: JsonRecord | null) {
   const envChecks = [
     { label: 'Supabase URL', ok: Boolean(supabaseUrl), detail: supabaseUrl ? 'Configured' : 'Missing' },
@@ -722,7 +888,7 @@ function startRealtimeBridge() {
       source: 'server',
       eventType: 'REALTIME_STATUS',
       title: `Realtime bridge ${status.toLowerCase()}`,
-      description: 'Owner dashboard Supabase realtime listener changed state.',
+      description: 'Admin Control Centre Supabase realtime listener changed state.',
       severity: status === 'SUBSCRIBED' ? 'success' : 'warning',
       status,
     });
@@ -1153,10 +1319,164 @@ app.get('/api/admin/bootstrap', requireAdmin, async (_req, res) => {
   }
 });
 
+app.get('/api/admin/organizations', requireAdmin, async (req, res) => {
+  try {
+    const search = String(req.query.q || '').trim().toLowerCase();
+    const status = String(req.query.status || 'all').trim().toLowerCase();
+    const plan = String(req.query.plan || 'all').trim().toLowerCase();
+    const core = await loadCoreData();
+    const authUsers = await listAuthUsers().catch(() => []);
+    let organizations = buildOrganizationRows(core, authUsers);
+
+    if (search) {
+      organizations = organizations.filter((organization) =>
+        [
+          organization.orgName,
+          organization.ownerName,
+          organization.ownerEmail,
+          organization.ownerUserId,
+          organization.plan,
+          organization.status,
+        ]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(search)),
+      );
+    }
+
+    if (status !== 'all') {
+      organizations = organizations.filter((organization) => String(organization.status || 'none').toLowerCase() === status);
+    }
+
+    if (plan !== 'all') {
+      organizations = organizations.filter((organization) => String(organization.plan || 'none').toLowerCase() === plan);
+    }
+
+    const allOrganizations = buildOrganizationRows(core, authUsers);
+    res.json({
+      organizations: organizations.sort(
+        (left, right) => Date.parse(String(right.updatedAt || right.createdAt || 0)) - Date.parse(String(left.updatedAt || left.createdAt || 0)),
+      ),
+      summary: {
+        total: allOrganizations.length,
+        active: allOrganizations.filter((organization) => ['active', 'trialing'].includes(String(organization.status).toLowerCase())).length,
+        suspended: allOrganizations.filter((organization) => ['suspended', 'banned', 'deleted'].includes(String(organization.status).toLowerCase())).length,
+        revenue: Math.round(allOrganizations.reduce((total, organization) => total + organization.revenue, 0) * 100) / 100,
+        risk: allOrganizations.filter((organization) => organization.riskFlags.length > 0).length,
+      },
+      generatedAt: nowIso(),
+    });
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.get('/api/admin/organizations/:orgId', requireAdmin, async (req, res) => {
+  try {
+    const { orgId } = req.params;
+    const core = await loadCoreData();
+    const authUsers = await listAuthUsers().catch(() => []);
+    const detail = buildOrganizationDetail(core, authUsers, orgId);
+    if (!detail) {
+      res.status(404).json({ error: 'Organization was not found.' });
+      return;
+    }
+    res.json(detail);
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.post('/api/admin/organizations/:orgId/action', requireAdmin, async (req: AdminRequest, res) => {
+  try {
+    const { orgId } = req.params;
+    const action = normalizeString(req.body.action);
+    if (!action) {
+      throw new Error('Organization action is required.');
+    }
+
+    let impersonation: JsonRecord | null = null;
+
+    if (['suspend', 'activate', 'delete', 'update_plan'].includes(action)) {
+      const updates: JsonRecord = { updated_at: nowIso() };
+      if (action === 'suspend') {
+        updates.billing_status = 'suspended';
+      }
+      if (action === 'activate') {
+        updates.billing_status = 'active';
+      }
+      if (action === 'delete') {
+        updates.billing_status = 'deleted';
+        updates.onboarding_completed = false;
+      }
+      if (action === 'update_plan') {
+        const selectedPlan = normalizeString(req.body.selectedPlan);
+        if (!selectedPlan) {
+          throw new Error('selectedPlan is required for update_plan.');
+        }
+        updates.selected_plan = selectedPlan;
+        if (Object.prototype.hasOwnProperty.call(req.body, 'billingCycle')) {
+          updates.billing_cycle = normalizeString(req.body.billingCycle) || null;
+        }
+        if (Object.prototype.hasOwnProperty.call(req.body, 'billingStatus')) {
+          updates.billing_status = normalizeString(req.body.billingStatus) || 'active';
+        }
+      }
+
+      const { error } = await adminSupabase.from('app_profiles').update(updates).eq('user_id', orgId);
+      if (error) {
+        throw error;
+      }
+      await recordAdminAudit(req.admin, `ORG_${action.toUpperCase()}`, orgId, { updates });
+    } else if (action === 'ban' || action === 'unban') {
+      const { error } = await adminSupabase.auth.admin.updateUserById(orgId, {
+        ban_duration: action === 'ban' ? normalizeString(req.body.duration) || '876000h' : 'none',
+      });
+      if (error) {
+        throw error;
+      }
+      await recordAdminAudit(req.admin, action === 'ban' ? 'BAN_ORG' : 'UNBAN_ORG', orgId);
+    } else if (action === 'impersonate') {
+      const authUser = await getAuthUserById(orgId);
+      const email = normalizeString(authUser?.email);
+      if (!email) {
+        throw new Error('This organization owner does not have an email address for impersonation.');
+      }
+
+      const { data, error } = await adminSupabase.auth.admin.generateLink({
+        type: 'magiclink',
+        email,
+      });
+      if (error) {
+        throw error;
+      }
+
+      impersonation = {
+        email,
+        actionLink: data.properties?.action_link || null,
+      };
+      await recordAdminAudit(req.admin, 'IMPERSONATE_ORG_LOGIN', orgId, { email });
+    } else {
+      throw new Error('Unsupported organization action.');
+    }
+
+    const core = await loadCoreData();
+    const authUsers = await listAuthUsers().catch(() => []);
+    const detail = buildOrganizationDetail(core, authUsers, orgId);
+    res.json({
+      detail,
+      impersonation,
+      generatedAt: nowIso(),
+    });
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
 app.get('/api/admin/users', requireAdmin, async (req, res) => {
   try {
     const search = String(req.query.q || '').trim().toLowerCase();
     const status = String(req.query.status || 'all').trim().toLowerCase();
+    const orgId = String(req.query.orgId || 'all').trim();
     const core = await loadCoreData();
     const authUsers = await listAuthUsers().catch(() => []);
     let users = buildUserRows({
@@ -1181,6 +1501,10 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
 
     if (status !== 'all') {
       users = users.filter((user) => String(user.billingStatus || 'none').toLowerCase() === status);
+    }
+
+    if (orgId !== 'all') {
+      users = users.filter((user) => user.userId === orgId);
     }
 
     res.json({
@@ -1300,7 +1624,7 @@ app.post('/api/admin/users/:userId/credits', requireAdmin, async (req: AdminRequ
     const { userId } = req.params;
     const amount = normalizeNumber(req.body.amount);
     const type = req.body.type === 'deduction' ? 'deduction' : 'addition';
-    const description = normalizeString(req.body.description) || 'Owner dashboard credit adjustment';
+    const description = normalizeString(req.body.description) || 'Admin Control Centre credit adjustment';
     if (!amount || amount <= 0) {
       throw new Error('Amount must be greater than zero.');
     }
@@ -1587,5 +1911,5 @@ app.listen(port, () => {
     startRealtimeBridge();
   }
 
-  console.log(`Connektly owner dashboard API listening on http://127.0.0.1:${port}`);
+  console.log(`Connektly Admin Control Centre API listening on http://127.0.0.1:${port}`);
 });

@@ -18,7 +18,6 @@ import {
   SlidersHorizontal,
   Upload,
   User,
-  UserCog,
   Users,
 } from 'lucide-react';
 import { adminApi } from '../lib/adminApi';
@@ -227,14 +226,10 @@ export default function OwnerSettingsPage() {
         </div>
       ) : null}
 
-      <section className="rounded-[28px] border border-gray-200 bg-white p-6 shadow-sm">
+      <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#dcd6ff] bg-[#f5f3ff] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[#5b45ff]">
-              <UserCog className="h-3.5 w-3.5" />
-              Owner settings
-            </div>
-            <h1 className="mt-4 text-3xl font-bold tracking-tight text-gray-950">Profile Management</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Profile Management</h1>
             <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-500">
               Manage the owner identity, organization details, dashboard appearance, and internal alert preferences.
             </p>

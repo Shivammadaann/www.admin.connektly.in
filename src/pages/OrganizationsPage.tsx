@@ -1,0 +1,538 @@
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Ban,
+  Building2,
+  CreditCard,
+  ExternalLink,
+  Loader2,
+  LogIn,
+  RefreshCcw,
+  ShieldAlert,
+  Trash2,
+  TrendingUp,
+  UserCheck,
+  Users,
+} from 'lucide-react';
+import { adminApi } from '../lib/adminApi';
+import type { AdminOrganizationDetail, AdminOrganizationsResponse } from '../lib/types';
+import { formatCurrency, formatDateTime, formatNumber, labelize } from '../lib/format';
+import LiveEventFeed from '../components/LiveEventFeed';
+import MetricCard from '../components/MetricCard';
+import Panel from '../components/Panel';
+import StatusBadge from '../components/StatusBadge';
+
+const planOptions = ['starter', 'growth', 'scale', 'enterprise', 'manual'];
+const statusOptions = ['all', 'active', 'trialing', 'past_due', 'suspended', 'banned', 'deleted', 'setup'];
+
+function statusSeverity(status: string) {
+  const value = status.toLowerCase();
+  if (['active', 'trialing', 'ready'].includes(value)) return 'success' as const;
+  if (['past_due', 'suspended', 'setup'].includes(value)) return 'warning' as const;
+  if (['banned', 'deleted', 'cancelled'].includes(value)) return 'critical' as const;
+  return 'info' as const;
+}
+
+function planRank(plan: string) {
+  const order = ['free', 'starter', 'growth', 'scale', 'enterprise'];
+  const index = order.indexOf(plan.toLowerCase());
+  return index === -1 ? 0 : index;
+}
+
+export default function OrganizationsPage() {
+  const [data, setData] = useState<AdminOrganizationsResponse | null>(null);
+  const [detail, setDetail] = useState<AdminOrganizationDetail | null>(null);
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('all');
+  const [plan, setPlan] = useState('all');
+  const [planDraft, setPlanDraft] = useState('growth');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const selectedOrganization = data?.organizations.find((organization) => organization.orgId === selectedOrgId) || null;
+
+  const loadOrganizations = async (showLoader = true) => {
+    try {
+      setError(null);
+      if (showLoader) setIsLoading(true);
+      const response = await adminApi.getOrganizations({ q: search, status, plan });
+      setData(response);
+      setSelectedOrgId((current) =>
+        current && response.organizations.some((organization) => organization.orgId === current)
+          ? current
+          : response.organizations[0]?.orgId || null,
+      );
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to load organizations.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadDetail = async (orgId: string) => {
+    try {
+      setIsDetailLoading(true);
+      const response = await adminApi.getOrganization(orgId);
+      setDetail(response);
+      setPlanDraft(response.organization.plan === 'none' ? 'starter' : response.organization.plan);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to load organization detail.');
+    } finally {
+      setIsDetailLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadOrganizations();
+  }, []);
+
+  useEffect(() => {
+    if (selectedOrgId) {
+      void loadDetail(selectedOrgId);
+    } else {
+      setDetail(null);
+    }
+  }, [selectedOrgId]);
+
+  const runAction = async (
+    action: 'suspend' | 'activate' | 'delete' | 'ban' | 'unban' | 'update_plan' | 'impersonate',
+    payload: Record<string, unknown> = {},
+    orgIdOverride?: string,
+  ) => {
+    const targetOrgId = orgIdOverride || selectedOrgId;
+    if (!targetOrgId) return;
+    if (action === 'delete' && !window.confirm('Soft delete this organization by marking it deleted?')) return;
+
+    try {
+      setActionLoading(action);
+      setError(null);
+      setNotice(null);
+      const response = await adminApi.runOrganizationAction(targetOrgId, {
+        action,
+        ...payload,
+      });
+
+      if (response.detail) {
+        setDetail(response.detail);
+        setPlanDraft(response.detail.organization.plan === 'none' ? 'starter' : response.detail.organization.plan);
+      }
+
+      if (response.impersonation) {
+        if (response.impersonation.actionLink) {
+          window.open(response.impersonation.actionLink, '_blank', 'noopener,noreferrer');
+          setNotice(`Impersonation link opened for ${response.impersonation.email}.`);
+        } else {
+          setNotice(`Impersonation link could not be generated for ${response.impersonation.email}.`);
+        }
+      } else {
+        setNotice(`${labelize(action)} action completed.`);
+      }
+
+      await loadOrganizations(false);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Organization action failed.');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const planDirection = useMemo(() => {
+    if (!detail) return 'Update plan';
+    return planRank(planDraft) >= planRank(detail.organization.plan) ? 'Upgrade plan' : 'Downgrade plan';
+  }, [detail, planDraft]);
+
+  if (isLoading && !data) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-[#5b45ff]" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-6">
+      <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Organization Management</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-500">
+              Manage workspace organizations, support access, plan state, abuse risk, and billing activity.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadOrganizations()}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+          >
+            <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
+      </section>
+
+      {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
+      {notice ? <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div> : null}
+
+      {data ? (
+        <>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MetricCard label="Organizations" value={formatNumber(data.summary.total)} detail="Workspace profiles under management" Icon={Building2} tone="violet" />
+            <MetricCard label="Active orgs" value={formatNumber(data.summary.active)} detail={`${formatNumber(data.summary.suspended)} restricted`} Icon={UserCheck} tone="emerald" />
+            <MetricCard label="Revenue" value={formatCurrency(data.summary.revenue)} detail="Recorded payment webhook value" Icon={CreditCard} tone="sky" />
+            <MetricCard label="Risk review" value={formatNumber(data.summary.risk)} detail="Billing, ban, or usage flags" Icon={ShieldAlert} tone={data.summary.risk ? 'amber' : 'slate'} />
+          </div>
+
+          <Panel
+            title="Organizations"
+            description="Table view for organization operations, support login, plan changes, and account controls."
+            action={
+              <div className="flex flex-col gap-2 lg:flex-row">
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') void loadOrganizations();
+                  }}
+                  className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none lg:w-56"
+                  placeholder="Search organizations"
+                />
+                <select
+                  value={status}
+                  onChange={(event) => setStatus(event.target.value)}
+                  className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none"
+                >
+                  {statusOptions.map((item) => (
+                    <option key={item} value={item}>
+                      {item === 'all' ? 'All status' : labelize(item)}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={plan}
+                  onChange={(event) => setPlan(event.target.value)}
+                  className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none"
+                >
+                  <option value="all">All plans</option>
+                  {planOptions.map((item) => (
+                    <option key={item} value={item}>
+                      {labelize(item)}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => void loadOrganizations()}
+                  className="rounded-2xl bg-[#111827] px-4 py-2 text-sm font-semibold text-white"
+                >
+                  Apply
+                </button>
+              </div>
+            }
+          >
+            {data.organizations.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
+                No organizations match the current filters.
+              </div>
+            ) : (
+              <div className="thin-scrollbar overflow-x-auto rounded-2xl border border-gray-200">
+                <table className="min-w-[1120px] w-full border-collapse text-left text-sm">
+                  <thead className="bg-gray-50 text-xs uppercase tracking-[0.16em] text-gray-500">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold">Org Name</th>
+                      <th className="px-4 py-3 font-semibold">Plan</th>
+                      <th className="px-4 py-3 font-semibold">Users</th>
+                      <th className="px-4 py-3 font-semibold">Status</th>
+                      <th className="px-4 py-3 font-semibold">Revenue</th>
+                      <th className="px-4 py-3 font-semibold">Created</th>
+                      <th className="px-4 py-3 font-semibold">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 bg-white">
+                    {data.organizations.map((organization) => {
+                      const selected = selectedOrgId === organization.orgId;
+                      const isRestricted = ['suspended', 'banned', 'deleted'].includes(organization.status.toLowerCase());
+                      return (
+                        <tr key={organization.orgId} className={selected ? 'bg-[#f5f3ff]' : undefined}>
+                          <td className="px-4 py-4">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedOrgId(organization.orgId)}
+                              className="block max-w-[280px] text-left"
+                            >
+                              <span className="block truncate font-semibold text-gray-950">{organization.orgName}</span>
+                              <span className="mt-1 block truncate text-xs text-gray-500">{organization.ownerEmail || organization.ownerUserId}</span>
+                            </button>
+                          </td>
+                          <td className="px-4 py-4">
+                            <div className="text-sm font-semibold text-gray-950">{labelize(organization.plan)}</div>
+                            <div className="mt-1 text-xs text-gray-500">{labelize(organization.billingCycle || 'no cycle')}</div>
+                          </td>
+                          <td className="px-4 py-4 text-gray-700">{formatNumber(organization.userCount)}</td>
+                          <td className="px-4 py-4">
+                            <div className="space-y-2">
+                              <StatusBadge status={organization.status} severity={statusSeverity(organization.status)} compact />
+                              {organization.riskFlags.length ? (
+                                <p className="text-xs text-amber-700">{organization.riskFlags.length} risk flag</p>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="px-4 py-4 font-semibold text-gray-950">{formatCurrency(organization.revenue)}</td>
+                          <td className="px-4 py-4 text-xs text-gray-500">{formatDateTime(organization.createdAt)}</td>
+                          <td className="px-4 py-4">
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedOrgId(organization.orgId)}
+                                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                              >
+                                View
+                              </button>
+                              <button
+                                type="button"
+                                disabled={actionLoading === 'impersonate'}
+                                onClick={() => {
+                                  setSelectedOrgId(organization.orgId);
+                                  void runAction('impersonate', {}, organization.orgId);
+                                }}
+                                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                              >
+                                Impersonate
+                              </button>
+                              <button
+                                type="button"
+                                disabled={actionLoading === 'suspend' || actionLoading === 'activate'}
+                                onClick={() => {
+                                  setSelectedOrgId(organization.orgId);
+                                  void runAction(isRestricted ? 'activate' : 'suspend', {}, organization.orgId);
+                                }}
+                                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                              >
+                                {isRestricted ? 'Activate' : 'Suspend'}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Panel>
+
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+            <div className="space-y-6">
+              <Panel title="Organization actions" description={selectedOrganization?.orgName || 'Select an organization'}>
+                {selectedOrganization ? (
+                  <div className="space-y-4">
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                      <p className="text-sm font-semibold text-gray-950">{selectedOrganization.ownerName}</p>
+                      <p className="mt-1 truncate text-xs text-gray-500">{selectedOrganization.ownerEmail || selectedOrganization.ownerUserId}</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {selectedOrganization.channels.length ? (
+                          selectedOrganization.channels.map((channel) => (
+                            <span key={`${selectedOrganization.orgId}-${channel.type}`} className="rounded-full border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-600">
+                              {channel.type}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-gray-400">No connected channels</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        disabled={Boolean(actionLoading)}
+                        onClick={() => void runAction('impersonate')}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-60"
+                      >
+                        <LogIn className="h-4 w-4" />
+                        Impersonate login
+                      </button>
+                      <button
+                        type="button"
+                        disabled={Boolean(actionLoading)}
+                        onClick={() => void runAction(selectedOrganization.status.toLowerCase() === 'suspended' ? 'activate' : 'suspend')}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-60"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                        {selectedOrganization.status.toLowerCase() === 'suspended' ? 'Activate org' : 'Suspend org'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={Boolean(actionLoading)}
+                        onClick={() => void runAction(selectedOrganization.isBanned ? 'unban' : 'ban')}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#111827] px-4 py-3 text-sm font-semibold text-white hover:bg-[#1f2937] disabled:opacity-60"
+                      >
+                        <Ban className="h-4 w-4" />
+                        {selectedOrganization.isBanned ? 'Unban org' : 'Ban org'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={Boolean(actionLoading)}
+                        onClick={() => void runAction('delete')}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Delete org
+                      </button>
+                    </div>
+
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Plan control</span>
+                      <div className="flex flex-col gap-3 sm:flex-row">
+                        <select
+                          value={planDraft}
+                          onChange={(event) => setPlanDraft(event.target.value)}
+                          className="min-w-0 flex-1 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none"
+                        >
+                          {planOptions.map((item) => (
+                            <option key={item} value={item}>
+                              {labelize(item)}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={Boolean(actionLoading)}
+                          onClick={() =>
+                            void runAction('update_plan', {
+                              selectedPlan: planDraft,
+                              billingStatus: 'active',
+                            })
+                          }
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#5b45ff] px-4 py-3 text-sm font-semibold text-white hover:bg-[#4c38e0] disabled:opacity-60"
+                        >
+                          <TrendingUp className="h-4 w-4" />
+                          {planDirection}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
+                    Select an organization to manage actions.
+                  </div>
+                )}
+              </Panel>
+
+              <Panel title="Risk and abuse signals">
+                {selectedOrganization ? (
+                  selectedOrganization.riskFlags.length ? (
+                    <div className="space-y-3">
+                      {selectedOrganization.riskFlags.map((flag) => (
+                        <div key={flag} className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                          {flag}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                      No risk flags detected for this organization.
+                    </div>
+                  )
+                ) : (
+                  <div className="text-sm text-gray-500">Select an organization to review risk signals.</div>
+                )}
+              </Panel>
+            </div>
+
+            <div className="space-y-6">
+              <Panel title="Org Detail View" description={detail ? `Generated ${formatDateTime(detail.generatedAt)}` : undefined}>
+                {isDetailLoading ? (
+                  <div className="flex h-40 items-center justify-center">
+                    <Loader2 className="h-6 w-6 animate-spin text-[#5b45ff]" />
+                  </div>
+                ) : detail ? (
+                  <div className="space-y-5">
+                    <div className="grid gap-3 md:grid-cols-4">
+                      <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Conversations</p>
+                        <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(detail.usageStats.conversations)}</p>
+                      </div>
+                      <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">API Usage</p>
+                        <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(detail.usageStats.apiUsage)}</p>
+                      </div>
+                      <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Messages</p>
+                        <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(detail.usageStats.messages)}</p>
+                      </div>
+                      <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Webhooks</p>
+                        <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(detail.usageStats.webhookEvents)}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-5 xl:grid-cols-2">
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-950">Members</h3>
+                        <div className="mt-3 space-y-3">
+                          {detail.members.map((member) => (
+                            <div key={member.userId} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                              <p className="truncate text-sm font-semibold text-gray-950">{member.fullName}</p>
+                              <p className="mt-1 truncate text-xs text-gray-500">{member.email || member.userId}</p>
+                              <div className="mt-3 flex items-center justify-between gap-3">
+                                <StatusBadge status={member.isBanned ? 'banned' : member.billingStatus || 'active'} severity={member.isBanned ? 'critical' : statusSeverity(member.billingStatus || 'active')} compact />
+                                <span className="text-xs text-gray-500">{formatNumber(member.counts.conversations)} conversations</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-950">Billing history</h3>
+                        <div className="thin-scrollbar mt-3 max-h-[320px] space-y-3 overflow-y-auto">
+                          {detail.billingHistory.length ? (
+                            detail.billingHistory.map((entry) => (
+                              <div key={`${entry.type}-${entry.id}`} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-semibold text-gray-950">{entry.title}</p>
+                                    <p className="mt-1 text-xs text-gray-500">{formatDateTime(entry.createdAt)}</p>
+                                  </div>
+                                  <span className={entry.amount < 0 ? 'text-sm font-semibold text-rose-600' : 'text-sm font-semibold text-emerald-600'}>
+                                    {formatCurrency(entry.amount)}
+                                  </span>
+                                </div>
+                                <p className="mt-2 truncate font-mono text-xs text-gray-400">{entry.reference || entry.status}</p>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-5 py-8 text-center text-sm text-gray-500">
+                              No billing history found.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
+                    Select an organization to view usage stats and billing history.
+                  </div>
+                )}
+              </Panel>
+
+              <Panel title="Recent organization events">
+                {detail?.recentEvents.length ? (
+                  <LiveEventFeed events={detail.recentEvents} dense maxHeightClass="max-h-[420px]" />
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
+                    No recent events for this organization.
+                  </div>
+                )}
+              </Panel>
+            </div>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}

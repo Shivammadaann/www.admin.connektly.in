@@ -31,7 +31,7 @@ export default function CommandCenter() {
       setIsLoading(true);
       setOverview(await adminApi.getOverview());
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to load owner dashboard.');
+      setError(error instanceof Error ? error.message : 'Failed to load Admin Control Centre.');
     } finally {
       setIsLoading(false);
     }
@@ -64,14 +64,10 @@ export default function CommandCenter() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <section className="rounded-[28px] border border-gray-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+      <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#dcd6ff] bg-[#f5f3ff] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[#5b45ff]">
-              <Activity className="h-3.5 w-3.5" />
-              Owner command center
-            </div>
-            <h1 className="mt-4 text-3xl font-bold tracking-tight text-gray-950">Connektly operations</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Connektly operations</h1>
             <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-500">
               Live workspace, billing, webhook, and system signals from the client dashboard database.
             </p>

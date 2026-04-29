@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   Activity,
   Bell,
+  Building2,
   CreditCard,
   Gauge,
   LayoutDashboard,
@@ -25,7 +26,8 @@ import LiveEventFeed from './LiveEventFeed';
 
 const navItems = [
   { label: 'Command Center', path: '/dashboard', icon: LayoutDashboard },
-  { label: 'Users', path: '/dashboard/users', icon: Users },
+  { label: 'Organization Management', path: '/dashboard/organizations', icon: Building2 },
+  { label: 'Global Users', path: '/dashboard/users', icon: Users },
   { label: 'Payments', path: '/dashboard/payments', icon: CreditCard },
   { label: 'Webhooks Live', path: '/dashboard/webhooks', icon: Webhook },
   { label: 'Server Status', path: '/dashboard/server', icon: Server },
@@ -118,7 +120,7 @@ export default function AdminLayout({ adminEmail }: AdminLayoutProps) {
           <BrandMark className="h-8 w-8 shrink-0" />
           <div className="min-w-0">
             <p className="truncate text-xl font-bold tracking-tight text-white">Connektly</p>
-            <p className="truncate text-xs font-medium text-gray-500">Owner dashboard</p>
+            <p className="truncate text-xs font-medium text-gray-500">Admin Control Centre</p>
           </div>
         </div>
         <button
