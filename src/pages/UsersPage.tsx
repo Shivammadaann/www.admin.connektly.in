@@ -5,7 +5,9 @@ import {
   Building2,
   CheckCircle2,
   CreditCard,
+  Globe2,
   Loader2,
+  MonitorSmartphone,
   RefreshCcw,
   Search,
   Send,
@@ -14,7 +16,7 @@ import {
   Users,
 } from 'lucide-react';
 import { adminApi } from '../lib/adminApi';
-import type { AdminOrganizationRow, AdminUserDetail, AdminUserRow } from '../lib/types';
+import type { AdminLoginActivityEntry, AdminOrganizationRow, AdminUserDetail, AdminUserRow } from '../lib/types';
 import { formatDateTime, formatNumber, labelize } from '../lib/format';
 import MetricCard from '../components/MetricCard';
 import Modal from '../components/Modal';
@@ -47,6 +49,26 @@ function getUserRiskFlags(user: AdminUserRow) {
   ];
 
   return flags.filter(Boolean) as string[];
+}
+
+function formatRawPayload(value: unknown) {
+  try {
+    return JSON.stringify(value || {}, null, 2);
+  } catch {
+    return String(value || '');
+  }
+}
+
+function asArray<T = Record<string, unknown>>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function isFallbackLoginRecord(entry: AdminLoginActivityEntry) {
+  return asRecord(entry.rawPayload).auditLogAvailable === false;
 }
 
 export default function UsersPage() {
@@ -516,37 +538,40 @@ export default function UsersPage() {
                   </div>
 
                   <div className="grid gap-3 md:grid-cols-3">
-                    {Object.entries(detail.user.channels).map(([key, channel]) => (
+                    {Object.entries(asRecord(detail.user.channels)).map(([key, channel]) => {
+                      const channelRecord = asRecord(channel);
+                      return (
                       <div key={key} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">{labelize(key)}</p>
                         <div className="mt-3">
-                          <StatusBadge status={channel?.status || 'not connected'} compact />
+                          <StatusBadge status={channelRecord.status || 'not connected'} compact />
                         </div>
-                        {channel ? (
+                        {Object.keys(channelRecord).length > 0 ? (
                           <p className="mt-2 truncate text-xs text-gray-500">
-                            {String(channel.phone_number_id || channel.instagram_username || channel.page_name || '')}
+                            {String(channelRecord.phone_number_id || channelRecord.instagram_username || channelRecord.page_name || '')}
                           </p>
                         ) : null}
                       </div>
-                    ))}
+                    );
+                    })}
                   </div>
 
                   <div className="grid gap-3 md:grid-cols-4">
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Conversations</p>
-                      <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(detail.user.conversations.length)}</p>
+                      <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(asArray(detail.user.conversations).length)}</p>
                     </div>
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Messages</p>
-                      <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(detail.user.messages.length)}</p>
+                      <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(asArray(detail.user.messages).length)}</p>
                     </div>
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Calls</p>
-                      <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(detail.user.calls.length)}</p>
+                      <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(asArray(detail.user.calls).length)}</p>
                     </div>
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Notices</p>
-                      <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(detail.user.notifications.length)}</p>
+                      <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(asArray(detail.user.notifications).length)}</p>
                     </div>
                   </div>
                 </div>
@@ -562,17 +587,17 @@ export default function UsersPage() {
                 <div className="thin-scrollbar max-h-[360px] overflow-y-auto">
                   <div className="space-y-3">
                     {[
-                      ...detail.user.messages.slice(0, 6).map((item) => ({
+                      ...asArray(detail.user.messages).slice(0, 6).map((item) => ({
                         id: `message-${String(item.id)}`,
                         title: String(item.body || item.message_type || 'Message event'),
                         meta: `Message | ${formatDateTime(item.created_at)}`,
                       })),
-                      ...detail.user.calls.slice(0, 6).map((item) => ({
+                      ...asArray(detail.user.calls).slice(0, 6).map((item) => ({
                         id: `call-${String(item.id)}`,
                         title: `${labelize(item.type)} call`,
                         meta: `Call | ${formatDateTime(item.created_at)}`,
                       })),
-                      ...detail.user.emailCampaigns.slice(0, 6).map((item) => ({
+                      ...asArray(detail.user.emailCampaigns).slice(0, 6).map((item) => ({
                         id: `email-${String(item.id)}`,
                         title: String(item.campaign_name || item.subject || 'Email campaign'),
                         meta: `Email | ${formatDateTime(item.created_at)}`,
@@ -590,6 +615,60 @@ export default function UsersPage() {
               ) : (
                 <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
                   User activity appears after selecting a row.
+                </div>
+              )}
+            </Panel>
+
+            <Panel title="Login activity" description="Auth audit log with device, browser, IP, and raw event payloads.">
+              {detail ? (
+                asArray<AdminLoginActivityEntry>(detail.user.loginActivity).length ? (
+                  <div className="thin-scrollbar max-h-[520px] space-y-3 overflow-y-auto">
+                    {asArray<AdminLoginActivityEntry>(detail.user.loginActivity).map((entry) => (
+                      <div key={entry.id} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <StatusBadge status={entry.eventType || 'auth event'} compact />
+                              <span className="text-xs font-medium text-gray-500">{formatDateTime(entry.occurredAt)}</span>
+                            </div>
+                            <div className="mt-3 grid gap-2 text-xs text-gray-600 sm:grid-cols-2">
+                              <span className="inline-flex min-w-0 items-center gap-2">
+                                <MonitorSmartphone className="h-4 w-4 shrink-0 text-gray-400" />
+                                <span className="truncate">
+                                  {isFallbackLoginRecord(entry)
+                                    ? 'Only last sign-in timestamp is available'
+                                    : `${entry.device || 'Device not recorded'} / ${entry.browser || 'Browser not recorded'} / ${entry.os || 'OS not recorded'}`}
+                                </span>
+                              </span>
+                              <span className="inline-flex min-w-0 items-center gap-2">
+                                <Globe2 className="h-4 w-4 shrink-0 text-gray-400" />
+                                <span className="truncate">{isFallbackLoginRecord(entry) ? 'Apply auth audit RPC for IP details' : entry.ipAddress || 'IP not recorded by Supabase'}</span>
+                              </span>
+                            </div>
+                            <p className="mt-3 break-words font-mono text-[11px] leading-5 text-gray-500">
+                              {isFallbackLoginRecord(entry)
+                                ? 'This row is a fallback from auth.users.last_sign_in_at, not a full auth audit log.'
+                                : entry.userAgent || 'User agent not recorded in this auth event.'}
+                            </p>
+                          </div>
+                        </div>
+                        <details className="mt-3">
+                          <summary className="cursor-pointer text-xs font-semibold text-[#5b45ff]">View full log payload</summary>
+                          <pre className="thin-scrollbar mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-gray-200 bg-white p-3 text-[11px] leading-5 text-gray-600">
+                            {formatRawPayload(entry.rawPayload)}
+                          </pre>
+                        </details>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
+                    No login activity was returned for this user.
+                  </div>
+                )
+              ) : (
+                <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
+                  Select a user to view login activity.
                 </div>
               )}
             </Panel>

@@ -149,11 +149,26 @@ export const adminApi = {
   runOrganizationAction(
     orgId: string,
     payload: {
-      action: 'suspend' | 'activate' | 'delete' | 'ban' | 'unban' | 'update_plan' | 'impersonate';
+      action:
+        | 'suspend'
+        | 'activate'
+        | 'delete'
+        | 'ban'
+        | 'unban'
+        | 'update_plan'
+        | 'impersonate'
+        | 'check_webhook'
+        | 'activate_webhook'
+        | 'deactivate_webhook'
+        | 'unsubscribe_webhook'
+        | 'disconnect_waba'
+        | 'request_phone_code';
       selectedPlan?: string;
       billingCycle?: string;
       billingStatus?: string;
       duration?: string;
+      codeMethod?: 'SMS' | 'VOICE';
+      language?: string;
     },
   ) {
     return request<{ detail: AdminOrganizationDetail | null; impersonation: { email: string; actionLink: string | null } | null }>(

@@ -6,12 +6,14 @@ import {
   ExternalLink,
   Loader2,
   LogIn,
+  MessageCircle,
   RefreshCcw,
   ShieldAlert,
+  Smartphone,
   Trash2,
   TrendingUp,
   UserCheck,
-  Users,
+  Webhook,
 } from 'lucide-react';
 import { adminApi } from '../lib/adminApi';
 import type { AdminOrganizationDetail, AdminOrganizationsResponse } from '../lib/types';
@@ -101,13 +103,28 @@ export default function OrganizationsPage() {
   }, [manageOrgId]);
 
   const runAction = async (
-    action: 'suspend' | 'activate' | 'delete' | 'ban' | 'unban' | 'update_plan' | 'impersonate',
+    action:
+      | 'suspend'
+      | 'activate'
+      | 'delete'
+      | 'ban'
+      | 'unban'
+      | 'update_plan'
+      | 'impersonate'
+      | 'check_webhook'
+      | 'activate_webhook'
+      | 'deactivate_webhook'
+      | 'unsubscribe_webhook'
+      | 'disconnect_waba'
+      | 'request_phone_code',
     payload: Record<string, unknown> = {},
     orgIdOverride?: string,
   ) => {
     const targetOrgId = orgIdOverride || selectedOrgId;
     if (!targetOrgId) return;
     if (action === 'delete' && !window.confirm('Soft delete this organization by marking it deleted?')) return;
+    if (action === 'unsubscribe_webhook' && !window.confirm('Unsubscribe WhatsApp webhooks for this organization?')) return;
+    if (action === 'disconnect_waba' && !window.confirm('Disconnect this organization WABA account and remove its WhatsApp templates from the admin database?')) return;
 
     try {
       setActionLoading(action);
@@ -250,6 +267,9 @@ export default function OrganizationsPage() {
                   <thead className="bg-gray-50 text-xs uppercase tracking-[0.16em] text-gray-500">
                     <tr>
                       <th className="px-4 py-3 font-semibold">Org Name</th>
+                      <th className="px-4 py-3 font-semibold">Website</th>
+                      <th className="px-4 py-3 font-semibold">WhatsApp</th>
+                      <th className="px-4 py-3 font-semibold">Message Tier</th>
                       <th className="px-4 py-3 font-semibold">Plan</th>
                       <th className="px-4 py-3 font-semibold">Users</th>
                       <th className="px-4 py-3 font-semibold">Status</th>
@@ -267,6 +287,34 @@ export default function OrganizationsPage() {
                               <span className="block truncate font-semibold text-gray-950">{organization.orgName}</span>
                               <span className="mt-1 block truncate text-xs text-gray-500">{organization.ownerEmail || organization.ownerUserId}</span>
                             </div>
+                          </td>
+                          <td className="px-4 py-4">
+                            {organization.companyWebsite ? (
+                              <a
+                                href={organization.companyWebsite.startsWith('http') ? organization.companyWebsite : `https://${organization.companyWebsite}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex max-w-[180px] items-center gap-1 truncate text-xs font-semibold text-[#5b45ff] hover:underline"
+                              >
+                                <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                                <span className="truncate">{organization.companyWebsite}</span>
+                              </a>
+                            ) : (
+                              <span className="text-xs text-gray-400">Not set</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-4">
+                            <div className="max-w-[180px]">
+                              <span className="block truncate font-semibold text-gray-950">
+                                {organization.whatsapp?.displayPhoneNumber || organization.whatsapp?.phoneNumberId || 'Not linked'}
+                              </span>
+                              <span className="mt-1 block truncate text-xs text-gray-500">
+                                {organization.whatsapp?.verifiedName || organization.whatsapp?.businessAccountName || 'Embedded signup details'}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-4">
+                            <StatusBadge status={organization.whatsapp?.messagingLimitTier || 'Unknown'} severity="info" compact />
                           </td>
                           <td className="px-4 py-4">
                             <div className="text-sm font-semibold text-gray-950">{labelize(organization.plan)}</div>
@@ -422,6 +470,178 @@ export default function OrganizationsPage() {
                   )
                 ) : (
                   <div className="text-sm text-gray-500">Select an organization to review risk signals.</div>
+                )}
+              </Panel>
+
+              <Panel title="WhatsApp Business Number" description="Admin-only Meta channel details and webhook controls">
+                {selectedOrganization?.whatsapp ? (
+                  <div className="space-y-4">
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-gray-950">
+                            {selectedOrganization.whatsapp.displayPhoneNumber || selectedOrganization.whatsapp.phoneNumberId}
+                          </p>
+                          <p className="mt-1 truncate text-xs text-gray-500">
+                            {selectedOrganization.whatsapp.verifiedName || selectedOrganization.whatsapp.businessAccountName || 'WhatsApp sender'}
+                          </p>
+                        </div>
+                        <MessageCircle className="h-5 w-5 shrink-0 text-emerald-600" />
+                      </div>
+                      <div className="mt-4">
+                        <button
+                          type="button"
+                          disabled={Boolean(actionLoading)}
+                          onClick={() => void runAction('disconnect_waba')}
+                          className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Disconnect WABA account
+                        </button>
+                      </div>
+                      <div className="mt-4 grid gap-3 text-xs text-gray-600">
+                        <div className="flex justify-between gap-3">
+                          <span className="text-gray-400">WABA ID</span>
+                          <span className="min-w-0 truncate font-mono">{selectedOrganization.whatsapp.wabaId || 'Not available'}</span>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <span className="text-gray-400">Phone Number ID</span>
+                          <span className="min-w-0 truncate font-mono">{selectedOrganization.whatsapp.phoneNumberId || 'Not available'}</span>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <span className="text-gray-400">Message tier</span>
+                          <span className="font-semibold text-gray-950">{selectedOrganization.whatsapp.messagingLimitTier || 'Unknown'}</span>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <span className="text-gray-400">Quality</span>
+                          <span className="font-semibold text-gray-950">{selectedOrganization.whatsapp.qualityRating || 'Unknown'}</span>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <span className="text-gray-400">Last synced</span>
+                          <span>{formatDateTime(selectedOrganization.whatsapp.lastSyncedAt)}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-950">Incoming webhooks</p>
+                          <p className="mt-1 text-xs text-gray-500">
+                            {selectedOrganization.whatsapp.webhookSubscription.callbackUrl || 'Callback not checked yet'}
+                          </p>
+                        </div>
+                        <StatusBadge
+                          status={selectedOrganization.whatsapp.webhookSubscription.isSubscribed ? 'Subscribed' : 'Needs attention'}
+                          severity={selectedOrganization.whatsapp.webhookSubscription.isSubscribed ? 'success' : 'warning'}
+                          compact
+                        />
+                      </div>
+                      {selectedOrganization.whatsapp.webhookSubscription.lastError ? (
+                        <p className="mt-3 text-sm text-rose-600">{selectedOrganization.whatsapp.webhookSubscription.lastError}</p>
+                      ) : null}
+                      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                        <button
+                          type="button"
+                          disabled={Boolean(actionLoading)}
+                          onClick={() => void runAction('check_webhook')}
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-60"
+                        >
+                          <RefreshCcw className="h-4 w-4" />
+                          Check status
+                        </button>
+                        <button
+                          type="button"
+                          disabled={Boolean(actionLoading)}
+                          onClick={() => void runAction('activate_webhook')}
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#5b45ff] px-3 py-2 text-xs font-semibold text-white hover:bg-[#4c38e0] disabled:opacity-60"
+                        >
+                          <Webhook className="h-4 w-4" />
+                          Activate
+                        </button>
+                        <button
+                          type="button"
+                          disabled={Boolean(actionLoading)}
+                          onClick={() => void runAction('deactivate_webhook')}
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-60"
+                        >
+                          Deactivate
+                        </button>
+                        <button
+                          type="button"
+                          disabled={Boolean(actionLoading)}
+                          onClick={() => void runAction('unsubscribe_webhook')}
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                        >
+                          Unsubscribe
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-950">Phone verification code</p>
+                          <p className="mt-1 text-xs leading-5 text-gray-500">
+                            Meta can send a one-time code to {selectedOrganization.whatsapp.displayPhoneNumber || selectedOrganization.whatsapp.phoneNumberId}.
+                            This only starts verification; the code confirmation step still happens in Meta.
+                          </p>
+                        </div>
+                        <Smartphone className="h-5 w-5 shrink-0 text-sky-600" />
+                      </div>
+                      {selectedOrganization.whatsapp.verificationCodeRequest.lastRequestedAt ? (
+                        <p className="mt-3 text-xs text-gray-500">
+                          Last requested by {selectedOrganization.whatsapp.verificationCodeRequest.codeMethod || 'unknown method'} on{' '}
+                          {formatDateTime(selectedOrganization.whatsapp.verificationCodeRequest.lastRequestedAt)}.
+                        </p>
+                      ) : null}
+                      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                        <button
+                          type="button"
+                          disabled={Boolean(actionLoading)}
+                          onClick={() => void runAction('request_phone_code', { codeMethod: 'SMS', language: 'en_US' })}
+                          className="inline-flex items-center justify-center rounded-2xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-60"
+                        >
+                          Request by SMS
+                        </button>
+                        <button
+                          type="button"
+                          disabled={Boolean(actionLoading)}
+                          onClick={() => void runAction('request_phone_code', { codeMethod: 'VOICE', language: 'en_US' })}
+                          className="inline-flex items-center justify-center rounded-2xl bg-[#111827] px-3 py-2 text-xs font-semibold text-white hover:bg-[#1f2937] disabled:opacity-60"
+                        >
+                          Request by voice
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-950">Two-step verification</p>
+                          <p className="mt-1 text-xs text-gray-500">
+                            {selectedOrganization.whatsapp.twoStepVerification.lastPinUpdatedAt
+                              ? `Last PIN update: ${formatDateTime(selectedOrganization.whatsapp.twoStepVerification.lastPinUpdatedAt)}`
+                              : 'No PIN update timestamp stored.'}
+                          </p>
+                        </div>
+                        <StatusBadge
+                          status={selectedOrganization.whatsapp.twoStepVerification.isEnabled ? 'Enabled' : 'Not enabled'}
+                          severity={selectedOrganization.whatsapp.twoStepVerification.isEnabled ? 'success' : 'info'}
+                          compact
+                        />
+                      </div>
+                      <div className="mt-3 grid gap-2 text-xs text-gray-500">
+                        <span>Sender registered: {formatDateTime(selectedOrganization.whatsapp.senderRegistration.registeredAt)}</span>
+                        <span>Display name status: {selectedOrganization.whatsapp.displayName.status || 'Unknown'}</span>
+                        <span>Access token: {selectedOrganization.whatsapp.accessTokenLast4 ? `...${selectedOrganization.whatsapp.accessTokenLast4}` : 'Not available'}</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
+                    No WhatsApp Business number is linked through Embedded Sign Up for this organization.
+                  </div>
                 )}
               </Panel>
             </div>

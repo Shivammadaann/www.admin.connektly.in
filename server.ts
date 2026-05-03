@@ -2,6 +2,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
+import crypto from 'node:crypto';
 import dotenv from 'dotenv';
 import { createClient, type User } from '@supabase/supabase-js';
 
@@ -79,6 +80,12 @@ const allowedUserIds = new Set(
 const ownerProfileBucket = process.env.OWNER_PROFILE_BUCKET || 'owner-admin-profile-pictures';
 const primaryOwnerEmail = (process.env.PRIMARY_OWNER_EMAIL || 'admin@connektly.in').trim().toLowerCase();
 const adminInviteRedirectUrl = process.env.ADMIN_INVITE_REDIRECT_URL || '';
+const graphVersion = process.env.META_GRAPH_VERSION || 'v24.0';
+const metaWebhookVerifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN || '';
+const tokenEncryptionSecret = process.env.META_TOKEN_ENCRYPTION_KEY || '';
+const tokenEncryptionKey = tokenEncryptionSecret ? crypto.createHash('sha256').update(tokenEncryptionSecret).digest() : null;
+const razorpayKeyId = process.env.RAZORPAY_KEY_ID || '';
+const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET || '';
 
 const hasRequiredServerConfig = Boolean(supabaseUrl && supabaseAnonKey && supabaseServiceRoleKey);
 const anonSupabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseAnonKey || 'placeholder-key');
@@ -131,6 +138,10 @@ function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
+function normalizeStringArray(value: unknown) {
+  return Array.isArray(value) ? value.map((item) => normalizeString(item)).filter(Boolean) as string[] : [];
+}
+
 function asRows(value: unknown): JsonRecord[] {
   if (Array.isArray(value)) {
     return value.filter(isRecord);
@@ -158,6 +169,26 @@ function getBearerToken(req: Request) {
   const header = req.headers.authorization || '';
   const [scheme, token] = header.split(' ');
   return scheme?.toLowerCase() === 'bearer' && token ? token : null;
+}
+
+function decryptSecretValue(value: string) {
+  if (!value.startsWith('enc:') || !tokenEncryptionKey) {
+    return value;
+  }
+
+  const [iv, tag, payload] = value.slice(4).split('.');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', tokenEncryptionKey, Buffer.from(iv, 'base64'));
+  decipher.setAuthTag(Buffer.from(tag, 'base64'));
+  const decrypted = Buffer.concat([decipher.update(Buffer.from(payload, 'base64')), decipher.final()]);
+  return decrypted.toString('utf8');
+}
+
+function decryptAccessToken(value: unknown) {
+  const token = normalizeString(value);
+  if (!token) {
+    throw new Error('This WhatsApp channel does not have a stored Meta access token.');
+  }
+  return decryptSecretValue(token);
 }
 
 function sendError(res: Response, status: number, error: unknown) {
@@ -231,6 +262,18 @@ async function safeSelect(
   }
 }
 
+async function safeRpc(functionName: string, args: JsonRecord) {
+  try {
+    const { data, error } = await adminSupabase.rpc(functionName, args);
+    if (error) {
+      return { rows: [] as JsonRecord[], error: error.message };
+    }
+    return { rows: asRows(data), error: null };
+  } catch (error) {
+    return { rows: [] as JsonRecord[], error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 async function safeCount(table: string, build?: (query: any) => any) {
   try {
     let query = adminSupabase.from(table).select('*', { count: 'exact', head: true });
@@ -285,6 +328,200 @@ function userDisplayName(profile: JsonRecord | undefined, authUser?: User | null
     normalizeString(authUser?.email) ||
     'Unknown user'
   );
+}
+
+function detectBrowser(userAgent: string | null) {
+  const value = String(userAgent || '');
+  if (/Edg\//i.test(value)) return 'Microsoft Edge';
+  if (/OPR\//i.test(value) || /Opera/i.test(value)) return 'Opera';
+  if (/Chrome\//i.test(value) && !/Chromium/i.test(value)) return 'Chrome';
+  if (/Firefox\//i.test(value)) return 'Firefox';
+  if (/Safari\//i.test(value) && !/Chrome\//i.test(value)) return 'Safari';
+  if (/PostmanRuntime/i.test(value)) return 'Postman';
+  if (/curl/i.test(value)) return 'curl';
+  return value ? 'Unknown browser' : null;
+}
+
+function detectOs(userAgent: string | null) {
+  const value = String(userAgent || '');
+  if (/Windows NT/i.test(value)) return 'Windows';
+  if (/Android/i.test(value)) return 'Android';
+  if (/(iPhone|iPad|iPod)/i.test(value)) return 'iOS';
+  if (/Mac OS X|Macintosh/i.test(value)) return 'macOS';
+  if (/Linux/i.test(value)) return 'Linux';
+  return value ? 'Unknown OS' : null;
+}
+
+function detectDevice(userAgent: string | null, fallback?: string | null) {
+  const explicit = normalizeString(fallback);
+  if (explicit) return explicit;
+
+  const value = String(userAgent || '');
+  if (/iPad|Tablet/i.test(value)) return 'Tablet';
+  if (/Mobile|Android|iPhone|iPod/i.test(value)) return 'Mobile';
+  if (value) return 'Desktop';
+  return null;
+}
+
+function normalizeAuthEventType(value: unknown) {
+  const text = normalizeString(value) || 'auth_event';
+  return text.replace(/^user_?/i, '').replace(/[_-]+/g, ' ');
+}
+
+function nestedRecord(record: JsonRecord, key: string) {
+  return isRecord(record[key]) ? record[key] as JsonRecord : {};
+}
+
+function pickString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      const nested: string | null = pickString(...value);
+      if (nested) return nested;
+      continue;
+    }
+
+    const normalized = normalizeString(value);
+    if (normalized) return normalized;
+  }
+
+  return null;
+}
+
+function extractAuditUserAgent(rawPayload: JsonRecord, row: JsonRecord) {
+  const traits = nestedRecord(rawPayload, 'traits');
+  const metadata = nestedRecord(rawPayload, 'metadata');
+  const request = nestedRecord(rawPayload, 'request');
+  const requestHeaders = nestedRecord(request, 'headers');
+  const headers = nestedRecord(rawPayload, 'headers');
+  const context = nestedRecord(rawPayload, 'context');
+  const contextUserAgent = nestedRecord(context, 'user_agent');
+
+  return pickString(
+    row.user_agent,
+    rawPayload.user_agent,
+    rawPayload.userAgent,
+    rawPayload.user_agent_string,
+    rawPayload.userAgentString,
+    traits.user_agent,
+    traits.userAgent,
+    metadata.user_agent,
+    metadata.userAgent,
+    request.user_agent,
+    request.userAgent,
+    requestHeaders['user-agent'],
+    requestHeaders.user_agent,
+    requestHeaders.userAgent,
+    headers['user-agent'],
+    headers.user_agent,
+    headers.userAgent,
+    context.user_agent,
+    context.userAgent,
+    contextUserAgent.original,
+  );
+}
+
+function extractAuditIpAddress(rawPayload: JsonRecord, row: JsonRecord) {
+  const traits = nestedRecord(rawPayload, 'traits');
+  const metadata = nestedRecord(rawPayload, 'metadata');
+  const request = nestedRecord(rawPayload, 'request');
+  const requestHeaders = nestedRecord(request, 'headers');
+  const headers = nestedRecord(rawPayload, 'headers');
+
+  return pickString(
+    row.ip_address,
+    rawPayload.ip_address,
+    rawPayload.ipAddress,
+    rawPayload.ip,
+    traits.ip_address,
+    traits.ipAddress,
+    traits.ip,
+    metadata.ip_address,
+    metadata.ipAddress,
+    metadata.ip,
+    request.ip_address,
+    request.ipAddress,
+    request.ip,
+    requestHeaders['x-forwarded-for'],
+    requestHeaders['x-real-ip'],
+    requestHeaders['cf-connecting-ip'],
+    requestHeaders['x-client-ip'],
+    headers['x-forwarded-for'],
+    headers['x-real-ip'],
+    headers['cf-connecting-ip'],
+    headers['x-client-ip'],
+  );
+}
+
+function extractAuditDevice(rawPayload: JsonRecord, row: JsonRecord, userAgent: string | null) {
+  const traits = nestedRecord(rawPayload, 'traits');
+  const metadata = nestedRecord(rawPayload, 'metadata');
+  const request = nestedRecord(rawPayload, 'request');
+  return detectDevice(
+    userAgent,
+    pickString(
+      row.device,
+      rawPayload.device,
+      rawPayload.device_type,
+      rawPayload.deviceType,
+      traits.device,
+      traits.device_type,
+      traits.deviceType,
+      metadata.device,
+      metadata.device_type,
+      metadata.deviceType,
+      request.device,
+    ),
+  );
+}
+
+async function loadUserLoginActivity(userId: string, authUser: User | null) {
+  const audit = await safeRpc('get_admin_user_login_activity', {
+    p_user_id: userId,
+    p_limit: 200,
+  });
+
+  if (audit.rows.length > 0) {
+    return audit.rows.map((row) => {
+      const rawPayload = isRecord(row.raw_payload) ? row.raw_payload : {};
+      const userAgent = extractAuditUserAgent(rawPayload, row);
+      const device = extractAuditDevice(rawPayload, row, userAgent);
+      return {
+        id: normalizeString(row.id) || `${userId}:${normalizeString(row.occurred_at) || nowIso()}`,
+        occurredAt: normalizeString(row.occurred_at) || nowIso(),
+        eventType: normalizeAuthEventType(row.event_type),
+        ipAddress: extractAuditIpAddress(rawPayload, row),
+        userAgent,
+        device,
+        browser: detectBrowser(userAgent),
+        os: detectOs(userAgent),
+        location: normalizeString(row.location) || normalizeString(rawPayload.location),
+        rawPayload: row.raw_payload || row,
+      };
+    });
+  }
+
+  const fallback = authUser?.last_sign_in_at
+    ? [
+        {
+          id: `${userId}:last-sign-in`,
+          occurredAt: authUser.last_sign_in_at,
+          eventType: 'sign in',
+          ipAddress: null,
+          userAgent: null,
+          device: null,
+          browser: null,
+          os: null,
+          location: null,
+          rawPayload: {
+            source: 'auth.users.last_sign_in_at',
+            auditLogAvailable: false,
+            auditLogError: audit.error,
+          },
+        },
+      ]
+    : [];
+
+  return fallback;
 }
 
 const defaultOwnerNotifications = {
@@ -1110,6 +1347,139 @@ function normalizePaymentAmount(row: JsonRecord) {
   return 0;
 }
 
+function normalizePaymentMethodLabel(method: unknown, cardType?: unknown) {
+  const value = String(method || '').toLowerCase();
+  if (value === 'upi') return 'UPI';
+  if (value === 'card') {
+    const type = String(cardType || '').toLowerCase();
+    if (type === 'credit') return 'Credit Card';
+    if (type === 'debit') return 'Debit Card';
+    return 'Credit / Debit Card';
+  }
+  if (value === 'netbanking') return 'NetBanking';
+  if (value === 'wallet') return 'Wallet';
+  if (value === 'emi') return 'EMI';
+  if (value === 'emandate') return 'eMandate';
+  if (value === 'nach') return 'NACH';
+  return value ? formatTableName(value) : 'Not available';
+}
+
+function getRazorpayAuthHeader() {
+  if (!razorpayKeyId || !razorpayKeySecret) return null;
+  return `Basic ${Buffer.from(`${razorpayKeyId}:${razorpayKeySecret}`).toString('base64')}`;
+}
+
+async function fetchRazorpayJson(pathname: string, query?: Record<string, string>) {
+  const auth = getRazorpayAuthHeader();
+  if (!auth) {
+    throw new Error('Razorpay API keys are not configured.');
+  }
+
+  const url = new URL(`https://api.razorpay.com/v1/${pathname.replace(/^\/+/, '')}`);
+  for (const [key, value] of Object.entries(query || {})) {
+    url.searchParams.set(key, value);
+  }
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: auth,
+      'Content-Type': 'application/json',
+    },
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const errorMessage =
+      isRecord(payload) && isRecord(payload.error)
+        ? normalizeString(payload.error.description) || normalizeString(payload.error.reason)
+        : null;
+    throw new Error(errorMessage || `Razorpay API request failed with status ${response.status}.`);
+  }
+  return payload;
+}
+
+function latestPaidInvoice(invoices: unknown) {
+  const items = isRecord(invoices) && Array.isArray(invoices.items) ? invoices.items.filter(isRecord) : [];
+  return items
+    .filter((item) => normalizeString(item.payment_id))
+    .sort((left, right) => normalizeNumber(right.created_at) - normalizeNumber(left.created_at))[0] || null;
+}
+
+function mapRazorpayPaymentMethod(payment: JsonRecord | null, invoice: JsonRecord | null, error?: string | null) {
+  const method = normalizeString(payment?.method) || normalizeString(invoice?.payment_method);
+  const card = isRecord(payment?.card) ? payment.card as JsonRecord : {};
+  const upi = isRecord(payment?.upi) ? payment.upi as JsonRecord : {};
+  const cardLast4 =
+    normalizeString(card.last4) ||
+    normalizeString(payment?.card_last4) ||
+    normalizeString(payment?.card_last_four);
+  const cardType = normalizeString(card.type) || normalizeString(payment?.card_type);
+
+  return {
+    method: method || null,
+    label: normalizePaymentMethodLabel(method, cardType),
+    cardLast4,
+    cardNetwork: normalizeString(card.network),
+    cardType,
+    upiVpa: normalizeString(payment?.vpa) || normalizeString(upi.vpa),
+    paymentId: normalizeString(payment?.id) || normalizeString(invoice?.payment_id),
+    invoiceId: normalizeString(invoice?.id),
+    status: normalizeString(payment?.status) || normalizeString(invoice?.status),
+    error: error || null,
+  };
+}
+
+async function resolveSubscriptionPaymentMethod(subscriptionId: string) {
+  if (!getRazorpayAuthHeader()) {
+    return mapRazorpayPaymentMethod(null, null, 'Razorpay API keys are not configured.');
+  }
+
+  try {
+    const invoices = await fetchRazorpayJson('invoices', {
+      subscription_id: subscriptionId,
+      count: '10',
+    });
+    const invoice = latestPaidInvoice(invoices);
+    const paymentId = normalizeString(invoice?.payment_id);
+    if (!invoice || !paymentId) {
+      return mapRazorpayPaymentMethod(null, invoice, 'No paid invoice payment was found for this subscription.');
+    }
+
+    const payment = await fetchRazorpayJson(`payments/${encodeURIComponent(paymentId)}`, {
+      'expand[]': 'card',
+    });
+    return mapRazorpayPaymentMethod(isRecord(payment) ? payment : null, invoice);
+  } catch (error) {
+    return mapRazorpayPaymentMethod(null, null, error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function enrichProfilesWithPaymentMethods(profiles: JsonRecord[]) {
+  const cache = new Map<string, Awaited<ReturnType<typeof resolveSubscriptionPaymentMethod>>>();
+  const enriched: JsonRecord[] = [];
+
+  for (const profile of profiles) {
+    const subscriptionId = normalizeString(profile.razorpay_subscription_id);
+    if (!subscriptionId) {
+      enriched.push({
+        ...profile,
+        payment_method: mapRazorpayPaymentMethod(null, null, 'No Razorpay subscription is linked.'),
+      });
+      continue;
+    }
+
+    if (!cache.has(subscriptionId)) {
+      cache.set(subscriptionId, await resolveSubscriptionPaymentMethod(subscriptionId));
+    }
+
+    enriched.push({
+      ...profile,
+      payment_method: cache.get(subscriptionId),
+    });
+  }
+
+  return enriched;
+}
+
 function monthStart(offsetFromCurrent: number) {
   const date = new Date();
   date.setUTCDate(1);
@@ -1272,6 +1642,118 @@ function organizationNameForUser(user: ReturnType<typeof buildUserRows>[number])
   return user.companyName || user.fullName || user.email || `Organization ${user.userId.slice(0, 8)}`;
 }
 
+function getMetadataRecord(row: JsonRecord | null | undefined) {
+  return isRecord(row?.metadata) ? row.metadata as JsonRecord : {};
+}
+
+function getNestedRecord(record: JsonRecord, key: string) {
+  return isRecord(record[key]) ? record[key] as JsonRecord : {};
+}
+
+function mapWhatsAppWebhookSubscription(row: JsonRecord | null | undefined) {
+  const metadata = getMetadataRecord(row);
+  const subscription = getNestedRecord(metadata, 'webhookSubscription');
+  const entries = Array.isArray(subscription.entries) ? subscription.entries : [];
+  return {
+    isSubscribed: subscription.isSubscribed === true,
+    callbackUrl: normalizeString(subscription.overrideCallbackUri) || normalizeString(subscription.callbackUrl),
+    subscribedAt: normalizeString(subscription.subscribedAt),
+    unsubscribedAt: normalizeString(subscription.unsubscribedAt),
+    lastCheckedAt: normalizeString(subscription.lastCheckedAt),
+    lastError: normalizeString(subscription.lastError),
+    entries,
+  };
+}
+
+function mapWhatsAppTwoStepVerification(row: JsonRecord | null | undefined) {
+  const metadata = getMetadataRecord(row);
+  const twoStep = getNestedRecord(metadata, 'twoStepVerification');
+  const senderRegistration = getNestedRecord(metadata, 'senderRegistration');
+  const enabledAt = normalizeString(twoStep.enabledAt) || normalizeString(senderRegistration.registeredAt);
+  const disabledAt = normalizeString(twoStep.disabledAt) || normalizeString(senderRegistration.deregisteredAt);
+  const lastPinUpdatedAt = normalizeString(twoStep.lastPinUpdatedAt) || enabledAt;
+  const liveIsEnabled =
+    typeof twoStep.isPinEnabled === 'boolean'
+      ? twoStep.isPinEnabled
+      : normalizeString(twoStep.codeVerificationStatus)?.toUpperCase() === 'VERIFIED'
+        ? true
+        : null;
+  const enabledAtMs = Date.parse(String(enabledAt || ''));
+  const disabledAtMs = Date.parse(String(disabledAt || ''));
+  const inferredEnabled =
+    Boolean(enabledAt) &&
+    (!Number.isFinite(disabledAtMs) || !Number.isFinite(enabledAtMs) || enabledAtMs >= disabledAtMs);
+
+  return {
+    isEnabled: liveIsEnabled ?? inferredEnabled,
+    enabledAt,
+    disabledAt,
+    lastPinUpdatedAt,
+    liveStatusCheckedAt: normalizeString(twoStep.liveStatusCheckedAt),
+    codeVerificationStatus: normalizeString(twoStep.codeVerificationStatus),
+  };
+}
+
+function mapWhatsAppVerificationCodeRequest(row: JsonRecord | null | undefined) {
+  const request = getNestedRecord(getMetadataRecord(row), 'verificationCodeRequest');
+  return {
+    lastRequestedAt: normalizeString(request.lastRequestedAt),
+    lastVerifiedAt: normalizeString(request.lastVerifiedAt),
+    codeMethod: normalizeString(request.codeMethod),
+    language: normalizeString(request.language),
+    verifiedPhoneNumberId: normalizeString(request.verifiedPhoneNumberId),
+  };
+}
+
+function mapWhatsAppSenderRegistration(row: JsonRecord | null | undefined) {
+  const senderRegistration = getNestedRecord(getMetadataRecord(row), 'senderRegistration');
+  return {
+    registeredAt: normalizeString(senderRegistration.registeredAt),
+    deregisteredAt: normalizeString(senderRegistration.deregisteredAt),
+  };
+}
+
+function mapWhatsAppDisplayName(row: JsonRecord | null | undefined) {
+  const metadata = getMetadataRecord(row);
+  const displayNameRequest = getNestedRecord(metadata, 'displayNameRequest');
+  const displayNameApproval = getNestedRecord(metadata, 'displayNameApproval');
+  return {
+    requestedName: normalizeString(displayNameRequest.requestedName),
+    requestedAt: normalizeString(displayNameRequest.requestedAt),
+    status: normalizeString(displayNameApproval.status) || normalizeString(displayNameRequest.status) || normalizeString(row?.name_status),
+    approvedAt: normalizeString(displayNameApproval.approvedAt) || normalizeString(displayNameRequest.approvedAt),
+    lastCheckedAt: normalizeString(displayNameApproval.lastCheckedAt) || normalizeString(displayNameRequest.lastCheckedAt),
+  };
+}
+
+function mapWhatsAppChannel(row: JsonRecord | null | undefined) {
+  if (!row) return null;
+  return {
+    id: normalizeString(row.id) || '',
+    userId: normalizeString(row.user_id) || '',
+    setupType: normalizeString(row.setup_type),
+    connectionMethod: normalizeString(row.connection_method),
+    status: normalizeString(row.status) || 'connected',
+    wabaId: normalizeString(row.waba_id),
+    phoneNumberId: normalizeString(row.phone_number_id),
+    displayPhoneNumber: normalizeString(row.display_phone_number),
+    verifiedName: normalizeString(row.verified_name),
+    qualityRating: normalizeString(row.quality_rating),
+    messagingLimitTier: normalizeString(row.messaging_limit_tier),
+    businessAccountName: normalizeString(row.business_account_name),
+    accessTokenLast4: normalizeString(row.access_token_last4),
+    connectedAt: normalizeString(row.connected_at) || normalizeString(row.created_at),
+    lastSyncedAt: normalizeString(row.last_synced_at),
+    updatedAt: normalizeString(row.updated_at),
+    webhookSubscription: mapWhatsAppWebhookSubscription(row),
+    twoStepVerification: mapWhatsAppTwoStepVerification(row),
+    verificationCodeRequest: mapWhatsAppVerificationCodeRequest(row),
+    senderRegistration: mapWhatsAppSenderRegistration(row),
+    displayName: mapWhatsAppDisplayName(row),
+    metadata: getMetadataRecord(row),
+  };
+}
+
 function buildOrganizationRows(core: Awaited<ReturnType<typeof loadCoreData>>, authUsers: User[]) {
   const users = buildUserRows({
     authUsers,
@@ -1288,6 +1770,8 @@ function buildOrganizationRows(core: Awaited<ReturnType<typeof loadCoreData>>, a
   return users.map((user) => {
     const ownerUserId = user.userId;
     const ownerMatches = (row: JsonRecord) => rowOwnerUserId(row) === ownerUserId;
+    const profile = core.profiles.find((row) => row.user_id === ownerUserId);
+    const whatsappChannel = core.metaChannels.find((row) => row.user_id === ownerUserId);
     const messages = core.messages.filter(ownerMatches);
     const threads = core.threads.filter(ownerMatches);
     const callLogs = core.callLogs.filter(ownerMatches);
@@ -1312,7 +1796,9 @@ function buildOrganizationRows(core: Awaited<ReturnType<typeof loadCoreData>>, a
 
     return {
       orgId: ownerUserId,
-      orgName: organizationNameForUser(user),
+      orgName: normalizeString(profile?.company_name) || organizationNameForUser(user),
+      companyName: normalizeString(profile?.company_name),
+      companyWebsite: normalizeString(profile?.company_website),
       ownerUserId,
       ownerName: user.fullName,
       ownerEmail: user.email,
@@ -1325,6 +1811,7 @@ function buildOrganizationRows(core: Awaited<ReturnType<typeof loadCoreData>>, a
       updatedAt: user.updatedAt,
       isBanned: user.isBanned,
       channels: user.channels,
+      whatsapp: mapWhatsAppChannel(whatsappChannel),
       usage: {
         conversations: threads.length,
         messages: messages.length,
@@ -1401,6 +1888,216 @@ function buildOrganizationDetail(core: Awaited<ReturnType<typeof loadCoreData>>,
     recentEvents,
     generatedAt: nowIso(),
   };
+}
+
+function metaErrorMessage(payload: unknown) {
+  const payloadRecord = isRecord(payload) ? payload : {};
+  if (isRecord(payloadRecord.error)) {
+    const error = payloadRecord.error as JsonRecord;
+    return (
+      normalizeString(error.error_user_msg) ||
+      normalizeString(error.message) ||
+      normalizeString(isRecord(error.error_data) ? error.error_data.details : null)
+    );
+  }
+  return null;
+}
+
+async function metaRequest<T>(args: {
+  accessToken: string;
+  path: string;
+  method?: 'GET' | 'POST' | 'DELETE';
+  query?: Record<string, string>;
+  body?: JsonRecord;
+}) {
+  const url = new URL(`https://graph.facebook.com/${graphVersion}/${String(args.path).replace(/^\/+/, '')}`);
+  for (const [key, value] of Object.entries(args.query || {})) {
+    url.searchParams.set(key, value);
+  }
+
+  const response = await fetch(url, {
+    method: args.method || 'GET',
+    headers: {
+      Authorization: `Bearer ${args.accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: args.body ? JSON.stringify(args.body) : undefined,
+  });
+  const payload = await response.json().catch(() => null) as T;
+
+  if (!response.ok) {
+    throw new Error(metaErrorMessage(payload) || `Meta Graph API request failed with status ${response.status}.`);
+  }
+
+  return payload;
+}
+
+async function getOrgWhatsAppChannel(orgId: string) {
+  const { data, error } = await adminSupabase.from('meta_channels').select('*').eq('user_id', orgId).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error('This organization does not have a WhatsApp Business number linked.');
+  const row = data as JsonRecord;
+  return {
+    row,
+    accessToken: decryptAccessToken(row.access_token_ciphertext),
+  };
+}
+
+function getAdminWebhookCallbackUrl(req: Request) {
+  const baseUrl = clientApiBaseUrl || `${req.protocol}://${req.get('host') || ''}/api`;
+  return `${baseUrl.replace(/\/$/, '')}/meta/webhook`;
+}
+
+function resolveWhatsAppWebhookSubscriptionEntry(entries: JsonRecord[]) {
+  return entries.find((entry) => {
+    const callbackUrl = normalizeString(entry.callback_url) || normalizeString(entry.callbackUrl);
+    const fields = normalizeStringArray(entry.subscribed_fields || entry.fields);
+    return Boolean(callbackUrl || fields.some((field) => field.toLowerCase().includes('message')));
+  }) || null;
+}
+
+async function persistWhatsAppWebhookSubscriptionStatus(args: {
+  orgId: string;
+  row: JsonRecord;
+  req: Request;
+  entries: JsonRecord[];
+  isSubscribed: boolean;
+  lastError?: string | null;
+}) {
+  const timestamp = nowIso();
+  const metadata = getMetadataRecord(args.row);
+  const existing = getNestedRecord(metadata, 'webhookSubscription');
+  const callbackUrl = getAdminWebhookCallbackUrl(args.req);
+  const { data, error } = await adminSupabase
+    .from('meta_channels')
+    .update({
+      status: args.lastError ? 'error' : 'connected',
+      metadata: {
+        ...metadata,
+        webhookSubscription: {
+          ...existing,
+          isSubscribed: args.isSubscribed,
+          callbackUrl,
+          entries: args.entries,
+          subscribedAt: args.isSubscribed ? normalizeString(existing.subscribedAt) || timestamp : null,
+          unsubscribedAt: args.isSubscribed ? null : timestamp,
+          lastCheckedAt: timestamp,
+          lastError: args.lastError || null,
+        },
+      },
+      last_synced_at: timestamp,
+      updated_at: timestamp,
+    })
+    .eq('user_id', args.orgId)
+    .eq('id', args.row.id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data as JsonRecord;
+}
+
+async function listWhatsAppSubscribedApps(accessToken: string, wabaId: string) {
+  return metaRequest<{ data?: JsonRecord[] }>({ accessToken, path: `${wabaId}/subscribed_apps` });
+}
+
+async function subscribeWhatsAppWebhook(accessToken: string, wabaId: string, req: Request) {
+  if (!metaWebhookVerifyToken) {
+    throw new Error('META_WEBHOOK_VERIFY_TOKEN must be configured before WhatsApp webhooks can be activated.');
+  }
+  await metaRequest({
+    accessToken,
+    path: `${wabaId}/subscribed_apps`,
+    method: 'POST',
+    body: {
+      override_callback_uri: getAdminWebhookCallbackUrl(req),
+      verify_token: metaWebhookVerifyToken,
+    },
+  });
+  return listWhatsAppSubscribedApps(accessToken, wabaId);
+}
+
+async function unsubscribeWhatsAppWebhook(accessToken: string, wabaId: string) {
+  return metaRequest({ accessToken, path: `${wabaId}/subscribed_apps`, method: 'DELETE' });
+}
+
+async function runWhatsAppWebhookAction(orgId: string, action: string, req: Request) {
+  const { row, accessToken } = await getOrgWhatsAppChannel(orgId);
+  const wabaId = normalizeString(row.waba_id);
+  if (!wabaId) throw new Error('This WhatsApp channel is missing its WABA ID.');
+
+  if (action === 'check_webhook') {
+    const subscriptions = await listWhatsAppSubscribedApps(accessToken, wabaId);
+    const entries = Array.isArray(subscriptions.data) ? subscriptions.data.filter(isRecord) : [];
+    return persistWhatsAppWebhookSubscriptionStatus({
+      orgId,
+      row,
+      req,
+      entries,
+      isSubscribed: Boolean(resolveWhatsAppWebhookSubscriptionEntry(entries)),
+    });
+  }
+
+  if (action === 'activate_webhook') {
+    try {
+      const subscriptions = await subscribeWhatsAppWebhook(accessToken, wabaId, req);
+      const entries = Array.isArray(subscriptions.data) ? subscriptions.data.filter(isRecord) : [];
+      return persistWhatsAppWebhookSubscriptionStatus({ orgId, row, req, entries, isSubscribed: true });
+    } catch (error) {
+      await persistWhatsAppWebhookSubscriptionStatus({
+        orgId,
+        row,
+        req,
+        entries: [],
+        isSubscribed: false,
+        lastError: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
+  if (action === 'deactivate_webhook' || action === 'unsubscribe_webhook') {
+    await unsubscribeWhatsAppWebhook(accessToken, wabaId);
+    return persistWhatsAppWebhookSubscriptionStatus({ orgId, row, req, entries: [], isSubscribed: false });
+  }
+
+  throw new Error('Unsupported WhatsApp webhook action.');
+}
+
+async function requestWhatsAppVerificationCode(orgId: string, codeMethod: 'SMS' | 'VOICE', language: string) {
+  const { row, accessToken } = await getOrgWhatsAppChannel(orgId);
+  const phoneNumberId = normalizeString(row.phone_number_id);
+  if (!phoneNumberId) throw new Error('This WhatsApp channel is missing its phone number ID.');
+  await metaRequest({
+    accessToken,
+    path: `${phoneNumberId}/request_code`,
+    method: 'POST',
+    body: {
+      code_method: codeMethod,
+      language,
+    },
+  });
+
+  const timestamp = nowIso();
+  const metadata = getMetadataRecord(row);
+  const { data, error } = await adminSupabase
+    .from('meta_channels')
+    .update({
+      metadata: {
+        ...metadata,
+        verificationCodeRequest: {
+          lastRequestedAt: timestamp,
+          codeMethod,
+          language,
+        },
+      },
+      updated_at: timestamp,
+    })
+    .eq('user_id', orgId)
+    .eq('id', row.id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data as JsonRecord;
 }
 
 function summarizeHealth(dbLatencyMs: number | null, clientHealth: JsonRecord | null) {
@@ -2822,6 +3519,24 @@ app.post('/api/admin/organizations/:orgId/action', requireAdmin, requireAdminPer
         actionLink: data.properties?.action_link || null,
       };
       await recordAdminAudit(req.admin, 'IMPERSONATE_ORG_LOGIN', orgId, { email });
+    } else if (['check_webhook', 'activate_webhook', 'deactivate_webhook', 'unsubscribe_webhook'].includes(action)) {
+      await runWhatsAppWebhookAction(orgId, action, req);
+      await recordAdminAudit(req.admin, `WHATSAPP_${action.toUpperCase()}`, orgId);
+    } else if (action === 'disconnect_waba') {
+      const { error: templatesError } = await adminSupabase.from('meta_templates').delete().eq('user_id', orgId);
+      if (templatesError) {
+        throw templatesError;
+      }
+      const { error: channelError } = await adminSupabase.from('meta_channels').delete().eq('user_id', orgId);
+      if (channelError) {
+        throw channelError;
+      }
+      await recordAdminAudit(req.admin, 'WHATSAPP_DISCONNECT_WABA', orgId);
+    } else if (action === 'request_phone_code') {
+      const codeMethod = String(req.body.codeMethod || '').toUpperCase() === 'VOICE' ? 'VOICE' : 'SMS';
+      const language = normalizeString(req.body.language) || 'en_US';
+      await requestWhatsAppVerificationCode(orgId, codeMethod, language);
+      await recordAdminAudit(req.admin, 'WHATSAPP_REQUEST_PHONE_CODE', orgId, { codeMethod, language });
     } else {
       throw new Error('Unsupported organization action.');
     }
@@ -2903,6 +3618,7 @@ app.get('/api/admin/users/:userId', requireAdmin, requireAdminPermission('global
       ]);
 
     const profileRow = profile.rows[0] || null;
+    const loginActivity = await loadUserLoginActivity(userId, authUser);
     res.json({
       user: {
         userId,
@@ -2931,6 +3647,7 @@ app.get('/api/admin/users/:userId', requireAdmin, requireAdminPermission('global
         credits: credits.rows,
         emailCampaigns: emailCampaigns.rows,
         notifications: notifications.rows,
+        loginActivity,
       },
       generatedAt: nowIso(),
     });
@@ -3118,6 +3835,8 @@ app.get('/api/admin/payments', requireAdmin, requireAdminPermission('payments'),
       { additions: 0, deductions: 0 },
     );
 
+    const enrichedProfiles = await enrichProfilesWithPaymentMethods(profiles.rows);
+
     res.json({
       summary: {
         profiles: profiles.rows.length,
@@ -3129,7 +3848,7 @@ app.get('/api/admin/payments', requireAdmin, requireAdminPermission('payments'),
       },
       billingBreakdown,
       planBreakdown,
-      profiles: profiles.rows,
+      profiles: enrichedProfiles,
       creditLedger: creditLedger.rows,
       paymentEvents: paymentEvents.rows,
       generatedAt: nowIso(),

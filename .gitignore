@@ -4,3 +4,5 @@ dist
 .env.local
 server.out.log
 server.err.log
+dev.out.log
+dev.err.log

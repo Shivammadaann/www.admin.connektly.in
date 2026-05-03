@@ -152,6 +152,8 @@ export type GlobalIntegrationsResponse = {
 export type AdminOrganizationRow = {
   orgId: string;
   orgName: string;
+  companyName: string | null;
+  companyWebsite: string | null;
   ownerUserId: string;
   ownerName: string;
   ownerEmail: string | null;
@@ -164,6 +166,7 @@ export type AdminOrganizationRow = {
   updatedAt: string | null;
   isBanned: boolean;
   channels: Array<{ type: string; status: unknown }>;
+  whatsapp: AdminWhatsAppChannel | null;
   usage: {
     conversations: number;
     messages: number;
@@ -174,6 +177,61 @@ export type AdminOrganizationRow = {
     creditBalance: number;
   };
   riskFlags: string[];
+};
+
+export type AdminWhatsAppChannel = {
+  id: string;
+  userId: string;
+  setupType: string | null;
+  connectionMethod: string | null;
+  status: string;
+  wabaId: string | null;
+  phoneNumberId: string | null;
+  displayPhoneNumber: string | null;
+  verifiedName: string | null;
+  qualityRating: string | null;
+  messagingLimitTier: string | null;
+  businessAccountName: string | null;
+  accessTokenLast4: string | null;
+  connectedAt: string | null;
+  lastSyncedAt: string | null;
+  updatedAt: string | null;
+  webhookSubscription: {
+    isSubscribed: boolean;
+    callbackUrl: string | null;
+    subscribedAt: string | null;
+    unsubscribedAt: string | null;
+    lastCheckedAt: string | null;
+    lastError: string | null;
+    entries: unknown[];
+  };
+  twoStepVerification: {
+    isEnabled: boolean;
+    enabledAt: string | null;
+    disabledAt: string | null;
+    lastPinUpdatedAt: string | null;
+    liveStatusCheckedAt: string | null;
+    codeVerificationStatus: string | null;
+  };
+  verificationCodeRequest: {
+    lastRequestedAt: string | null;
+    lastVerifiedAt: string | null;
+    codeMethod: string | null;
+    language: string | null;
+    verifiedPhoneNumberId: string | null;
+  };
+  senderRegistration: {
+    registeredAt: string | null;
+    deregisteredAt: string | null;
+  };
+  displayName: {
+    requestedName: string | null;
+    requestedAt: string | null;
+    status: string | null;
+    approvedAt: string | null;
+    lastCheckedAt: string | null;
+  };
+  metadata: Record<string, unknown>;
 };
 
 export type AdminOrganizationsResponse = {
@@ -413,8 +471,22 @@ export type AdminUserDetail = {
     credits: Record<string, unknown>[];
     emailCampaigns: Record<string, unknown>[];
     notifications: Record<string, unknown>[];
+    loginActivity?: AdminLoginActivityEntry[];
   };
   generatedAt: string;
+};
+
+export type AdminLoginActivityEntry = {
+  id: string;
+  occurredAt: string;
+  eventType: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  device: string | null;
+  browser: string | null;
+  os: string | null;
+  location: string | null;
+  rawPayload: unknown;
 };
 
 export type PaymentsResponse = {

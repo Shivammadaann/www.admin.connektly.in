@@ -7,6 +7,44 @@ import MetricCard from '../components/MetricCard';
 import Panel from '../components/Panel';
 import StatusBadge from '../components/StatusBadge';
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function paymentMethodDetail(profile: Record<string, unknown>) {
+  const method = asRecord(profile.payment_method);
+  const label = String(method.label || 'Not available');
+  const cardLast4 = method.cardLast4 ? String(method.cardLast4) : '';
+  const upiVpa = method.upiVpa ? String(method.upiVpa) : '';
+  const paymentId = method.paymentId ? String(method.paymentId) : '';
+  const error = method.error ? String(method.error) : '';
+
+  if (cardLast4) {
+    return {
+      label,
+      detail: `Card ending ${cardLast4}`,
+      subDetail: paymentId || error,
+      status: method.status || 'card',
+    };
+  }
+
+  if (String(method.method || '').toLowerCase() === 'upi') {
+    return {
+      label: 'UPI',
+      detail: upiVpa || 'UPI mandate',
+      subDetail: paymentId || error,
+      status: method.status || 'upi',
+    };
+  }
+
+  return {
+    label,
+    detail: paymentId || error || 'No payment method found',
+    subDetail: '',
+    status: method.status || method.method || 'unknown',
+  };
+}
+
 export default function PaymentsPage() {
   const [data, setData] = useState<PaymentsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -106,24 +144,38 @@ export default function PaymentsPage() {
                       <th className="pb-3 pr-4 font-semibold">Plan</th>
                       <th className="pb-3 pr-4 font-semibold">Status</th>
                       <th className="pb-3 pr-4 font-semibold">Cycle</th>
+                      <th className="pb-3 pr-4 font-semibold">Payment Method</th>
                       <th className="pb-3 font-semibold">Razorpay</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {data.profiles.map((profile) => (
-                      <tr key={String(profile.user_id)} className="align-top">
-                        <td className="py-4 pr-4">
-                          <div className="font-semibold text-gray-950">{String(profile.company_name || profile.full_name || 'Workspace')}</div>
-                          <div className="mt-1 text-xs text-gray-500">{String(profile.email || profile.user_id)}</div>
-                        </td>
-                        <td className="py-4 pr-4 text-gray-700">{labelize(profile.selected_plan)}</td>
-                        <td className="py-4 pr-4">
-                          <StatusBadge status={profile.billing_status || 'unknown'} compact />
-                        </td>
-                        <td className="py-4 pr-4 text-gray-700">{labelize(profile.billing_cycle)}</td>
-                        <td className="py-4 font-mono text-xs text-gray-500">{String(profile.razorpay_subscription_id || 'Not linked')}</td>
-                      </tr>
-                    ))}
+                    {data.profiles.map((profile) => {
+                      const payment = paymentMethodDetail(profile);
+                      return (
+                        <tr key={String(profile.user_id)} className="align-top">
+                          <td className="py-4 pr-4">
+                            <div className="font-semibold text-gray-950">{String(profile.company_name || profile.full_name || 'Workspace')}</div>
+                            <div className="mt-1 text-xs text-gray-500">{String(profile.email || profile.user_id)}</div>
+                          </td>
+                          <td className="py-4 pr-4 text-gray-700">{labelize(profile.selected_plan)}</td>
+                          <td className="py-4 pr-4">
+                            <StatusBadge status={profile.billing_status || 'unknown'} compact />
+                          </td>
+                          <td className="py-4 pr-4 text-gray-700">{labelize(profile.billing_cycle)}</td>
+                          <td className="py-4 pr-4">
+                            <div className="min-w-[160px]">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-semibold text-gray-950">{payment.label}</span>
+                                <StatusBadge status={payment.status} compact />
+                              </div>
+                              <p className="mt-1 text-xs text-gray-500">{payment.detail}</p>
+                              {payment.subDetail ? <p className="mt-1 truncate font-mono text-[11px] text-gray-400">{payment.subDetail}</p> : null}
+                            </div>
+                          </td>
+                          <td className="py-4 font-mono text-xs text-gray-500">{String(profile.razorpay_subscription_id || 'Not linked')}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

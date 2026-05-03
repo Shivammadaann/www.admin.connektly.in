@@ -234,6 +234,96 @@ $$;
 
 grant execute on function public.get_user_platform_settings(uuid) to anon, authenticated;
 
+create or replace function public.get_admin_user_login_activity(
+  p_user_id uuid,
+  p_limit integer default 100
+)
+returns table (
+  id text,
+  occurred_at timestamptz,
+  event_type text,
+  ip_address text,
+  user_agent text,
+  device text,
+  raw_payload jsonb
+)
+language sql
+security definer
+set search_path = public, auth
+as $$
+  select
+    audit.id::text as id,
+    audit.created_at as occurred_at,
+    coalesce(
+      audit.payload::jsonb->>'action',
+      audit.payload::jsonb->>'event',
+      audit.payload::jsonb->>'log_type',
+      'auth_event'
+    ) as event_type,
+    coalesce(
+      nullif(audit.ip_address::text, ''),
+      audit.payload::jsonb->>'ip_address',
+      audit.payload::jsonb->>'ipAddress',
+      audit.payload::jsonb->>'ip',
+      audit.payload::jsonb->'traits'->>'ip_address',
+      audit.payload::jsonb->'traits'->>'ipAddress',
+      audit.payload::jsonb->'traits'->>'ip',
+      audit.payload::jsonb->'metadata'->>'ip_address',
+      audit.payload::jsonb->'metadata'->>'ipAddress',
+      audit.payload::jsonb->'metadata'->>'ip',
+      audit.payload::jsonb->'request'->>'ip_address',
+      audit.payload::jsonb->'request'->>'ipAddress',
+      audit.payload::jsonb->'request'->>'ip',
+      audit.payload::jsonb->'request'->'headers'->>'x-forwarded-for',
+      audit.payload::jsonb->'request'->'headers'->>'x-real-ip',
+      audit.payload::jsonb->'request'->'headers'->>'cf-connecting-ip',
+      audit.payload::jsonb->'headers'->>'x-forwarded-for',
+      audit.payload::jsonb->'headers'->>'x-real-ip',
+      audit.payload::jsonb->'headers'->>'cf-connecting-ip'
+    ) as ip_address,
+    coalesce(
+      audit.payload::jsonb->>'user_agent',
+      audit.payload::jsonb->>'userAgent',
+      audit.payload::jsonb->>'user_agent_string',
+      audit.payload::jsonb->>'userAgentString',
+      audit.payload::jsonb->'traits'->>'user_agent',
+      audit.payload::jsonb->'traits'->>'userAgent',
+      audit.payload::jsonb->'metadata'->>'user_agent',
+      audit.payload::jsonb->'metadata'->>'userAgent',
+      audit.payload::jsonb->'request'->>'user_agent',
+      audit.payload::jsonb->'request'->>'userAgent',
+      audit.payload::jsonb->'request'->'headers'->>'user-agent',
+      audit.payload::jsonb->'request'->'headers'->>'user_agent',
+      audit.payload::jsonb->'headers'->>'user-agent',
+      audit.payload::jsonb->'headers'->>'user_agent',
+      audit.payload::jsonb->'context'->>'user_agent',
+      audit.payload::jsonb->'context'->>'userAgent',
+      audit.payload::jsonb->'context'->'user_agent'->>'original'
+    ) as user_agent,
+    coalesce(
+      audit.payload::jsonb->>'device',
+      audit.payload::jsonb->>'device_type',
+      audit.payload::jsonb->>'deviceType',
+      audit.payload::jsonb->'traits'->>'device',
+      audit.payload::jsonb->'traits'->>'device_type',
+      audit.payload::jsonb->'traits'->>'deviceType',
+      audit.payload::jsonb->'metadata'->>'device',
+      audit.payload::jsonb->'metadata'->>'device_type',
+      audit.payload::jsonb->'metadata'->>'deviceType',
+      audit.payload::jsonb->'request'->>'device'
+    ) as device,
+    audit.payload::jsonb as raw_payload
+  from auth.audit_log_entries audit
+  where
+    audit.payload::jsonb->>'actor_id' = p_user_id::text
+    or audit.payload::jsonb->>'user_id' = p_user_id::text
+    or audit.payload::jsonb->'traits'->>'user_id' = p_user_id::text
+  order by audit.created_at desc
+  limit greatest(1, least(coalesce(p_limit, 100), 500));
+$$;
+
+grant execute on function public.get_admin_user_login_activity(uuid, integer) to authenticated;
+
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
   'owner-admin-profile-pictures',
