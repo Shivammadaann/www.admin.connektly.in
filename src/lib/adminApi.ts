@@ -2,6 +2,8 @@ import { clientConfig } from './config';
 import { getCachedSession } from './supabase';
 import type {
   AdminOverview,
+  ClientFeatureKey,
+  ClientFeatureOperationsResponse,
   AdminOrganizationDetail,
   AdminOrganizationsResponse,
   AdminUserDetail,
@@ -12,9 +14,14 @@ import type {
   LogsMonitoringResponse,
   PaymentsResponse,
   OwnerSettingsResponse,
+  PlanManagementResponse,
   ServerResponse,
   UserPlatformSettings,
   UserPlatformSettingsResponse,
+  WebsiteBlogPost,
+  WebsiteContentResponse,
+  WebsiteHelpArticle,
+  WebsiteMediaUploadResponse,
   WebhooksResponse,
   AdminLiveEvent,
 } from './types';
@@ -81,6 +88,70 @@ export const adminApi = {
   },
   getGlobalIntegrations() {
     return request<GlobalIntegrationsResponse>('/integrations', { cache: 'no-store' });
+  },
+  getClientFeatures() {
+    return request<ClientFeatureOperationsResponse>('/client-features', { cache: 'no-store' });
+  },
+  updateClientFeatureStatus(featureKey: ClientFeatureKey, userId: string, payload: { status: string; notifyUser?: boolean }) {
+    return request<ClientFeatureOperationsResponse>(
+      `/client-features/${encodeURIComponent(featureKey)}/${encodeURIComponent(userId)}/status`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      },
+    );
+  },
+  getPlans() {
+    return request<PlanManagementResponse>('/plans', { cache: 'no-store' });
+  },
+  updatePlans(plans: PlanManagementResponse['plans']) {
+    return request<PlanManagementResponse>('/plans', {
+      method: 'PUT',
+      body: JSON.stringify({ plans }),
+    });
+  },
+  getWebsiteContent() {
+    return request<WebsiteContentResponse>('/website-content', { cache: 'no-store' });
+  },
+  uploadWebsiteMedia(payload: { fileName: string; dataUrl: string }) {
+    return request<WebsiteMediaUploadResponse>('/website-content/media', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+  createWebsiteBlog(payload: Omit<WebsiteBlogPost, 'id' | 'date' | 'updatedAt'>) {
+    return request<WebsiteContentResponse>('/website-content/blogs', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+  updateWebsiteBlog(id: string, payload: Omit<WebsiteBlogPost, 'id' | 'date' | 'updatedAt'>) {
+    return request<WebsiteContentResponse>(`/website-content/blogs/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+  deleteWebsiteBlog(id: string) {
+    return request<WebsiteContentResponse>(`/website-content/blogs/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  },
+  createWebsiteHelpArticle(payload: Omit<WebsiteHelpArticle, 'id' | 'date' | 'updatedAt'>) {
+    return request<WebsiteContentResponse>('/website-content/help', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+  updateWebsiteHelpArticle(id: string, payload: Omit<WebsiteHelpArticle, 'id' | 'date' | 'updatedAt'>) {
+    return request<WebsiteContentResponse>(`/website-content/help/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+  deleteWebsiteHelpArticle(id: string) {
+    return request<WebsiteContentResponse>(`/website-content/help/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
   },
   getOwnerSettings() {
     return request<OwnerSettingsResponse>('/settings', { cache: 'no-store' });

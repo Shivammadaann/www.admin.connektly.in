@@ -1,0 +1,877 @@
+CONNEKTLY ADMIN PANEL - WORKINGS AND FEATURES
+Generated from the codebase in www.admin.connektly.in on 2026-05-05.
+
+1. PRODUCT SUMMARY
+
+The Admin Panel is the Connektly owner control plane. It is built for owner/admin operators to monitor and manage all customer workspaces, users, billing, credits, webhooks, integrations, server health, admin users, and internal platform settings.
+
+The application has two main parts:
+- React/Vite frontend in src/.
+- Express/Supabase admin API in server.ts.
+
+The frontend authenticates with Supabase Auth, then calls the admin API with the Supabase access token as a bearer token. The backend verifies the token, checks admin access, uses the Supabase service role key for privileged reads/writes, and returns normalized admin-specific responses.
+
+
+2. TECHNOLOGY STACK
+
+Frontend:
+- React 19
+- React Router 7
+- Vite 6
+- Tailwind CSS 4
+- lucide-react icons
+- Supabase JavaScript client
+
+Backend:
+- Express
+- TypeScript runtime through tsx in development
+- Supabase JS with anon and service-role clients
+- Server-sent events for live admin events
+- Supabase realtime bridge for database change events
+
+Development/runtime:
+- npm run dev starts both the API and Vite client.
+- npm run dev:api runs server.ts on port 8787 by default.
+- npm run dev:client runs Vite on port 3004.
+- Vite proxies /api to http://127.0.0.1:8787 in development.
+- npm run build builds the Vite frontend.
+- npm run start runs server.js.
+
+
+3. REQUIRED CONFIGURATION
+
+Frontend environment variables:
+- VITE_SUPABASE_URL
+- VITE_SUPABASE_ANON_KEY
+- VITE_ADMIN_API_BASE_URL, optional, defaults to /api/admin
+- VITE_TURNSTILE_SITE_KEY
+- VITE_TURNSTILE_LOCAL_SITE_KEY, optional local override
+
+Server-only environment variables:
+- SUPABASE_SERVICE_ROLE_KEY
+- ADMIN_ALLOWED_EMAILS, legacy allowlist
+- ADMIN_ALLOWED_USER_IDS, legacy allowlist
+- PRIMARY_OWNER_EMAIL, defaults to admin@connektly.in
+- ADMIN_INVITE_REDIRECT_URL, optional redirect for invited admins
+- CLIENT_API_BASE_URL, optional client-app health and webhook URL base
+- OWNER_PROFILE_BUCKET, defaults to owner-admin-profile-pictures
+- META_GRAPH_VERSION, defaults to v24.0
+- META_WEBHOOK_VERIFY_TOKEN
+- META_TOKEN_ENCRYPTION_KEY, used to decrypt stored Meta access tokens
+- RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET, optional payment-method enrichment
+- PORT, defaults to 8787
+
+If the frontend does not have Supabase URL and anon key, the app shows a setup-required screen. If the server does not have Supabase URL, anon key, or service role key, protected admin API calls fail with a configuration error.
+
+
+4. LOGIN AND ACCESS FLOW
+
+Login:
+- /login renders the owner sign-in screen.
+- Users sign in with Supabase email/password auth.
+- Cloudflare Turnstile is supported through TurnstileWidget and a captcha token is passed to Supabase signInWithPassword when a Turnstile site key is available.
+- After successful login, the app redirects authenticated users to /dashboard.
+
+Session handling:
+- src/lib/supabase.ts creates a Supabase browser client.
+- getCachedSession caches the current Supabase session and avoids repeated session fetches.
+- App.tsx listens to Supabase auth state changes and updates the active session.
+
+Admin verification:
+- ProtectedAdmin calls adminApi.me().
+- The backend requireAdmin middleware verifies the bearer token using the Supabase anon client.
+- The backend then resolves admin access from owner_admin_users, primary owner email, or legacy env allowlists.
+- If the user is not allowed, the API returns 403 and the UI shows "Owner access blocked".
+
+Permission model:
+- Primary owner has all permissions and can manage dashboard admins.
+- Non-owner admins only see nav items for permissions assigned to them.
+- Disabled admin users are blocked.
+- The primary owner cannot be edited or removed from the dashboard admin list.
+
+Admin permission keys:
+- command_center
+- organizations
+- global_users
+- platform_settings
+- payments
+- logs_monitoring
+- global_integrations
+- webhooks
+- server_status
+- security_audit
+
+
+5. MAIN ROUTES AND NAVIGATION
+
+Public route:
+- /login: Owner/admin sign in.
+
+Protected routes under /dashboard:
+- /dashboard: Overview / Command Center.
+- /dashboard/organizations: Organization Management.
+- /dashboard/users: Global Users.
+- /dashboard/platform-settings: User Platform Settings.
+- /dashboard/logs-monitoring: Logs & Monitoring.
+- /dashboard/global-integrations: Global Integrations.
+- /dashboard/payments: Billing and Credit Control.
+- /dashboard/settings: Admin Profile.
+
+Compatibility redirects:
+- /dashboard/webhooks redirects to /dashboard/logs-monitoring.
+- /dashboard/server redirects to /dashboard/logs-monitoring.
+- /dashboard/audit redirects to /dashboard/logs-monitoring.
+
+Note:
+- Standalone WebhooksPage, ServerStatusPage, and AuditPage files still exist in src/pages, but App.tsx currently consolidates those functions into Logs & Monitoring by redirecting the old routes.
+
+Admin layout:
+- Sidebar shows only permitted sections.
+- Header contains a search input, live connection state, current date, notification bell, live event dropdown, profile avatar/name, and sign out.
+- Mobile sidebar is supported.
+- The profile area refreshes when OwnerSettingsPage dispatches owner-profile-updated.
+
+
+6. LIVE EVENTS AND REALTIME WORKING
+
+Frontend:
+- LiveEventsProvider opens /api/admin/live as an authenticated server-sent event stream.
+- The provider stores the latest 200 events, tracks connection status, and increments unread count.
+- If the stream disconnects, it tries to reconnect after 3.5 seconds.
+- The header bell shows unread event count and a dropdown of recent events.
+
+Backend:
+- /api/admin/live starts the realtime bridge, opens an SSE connection, sends a hello event, replays the latest 10 buffered events, and sends heartbeat frames every 25 seconds.
+- startRealtimeBridge subscribes to Supabase realtime postgres_changes for key tables.
+- Each database change is mapped into a normalized live event with title, severity, status, source, table, user ID, and raw payload.
+- recordAdminAudit also pushes live admin action events immediately.
+
+Realtime tables watched by server.ts:
+- app_profiles
+- meta_channels
+- instagram_channels
+- messenger_channels
+- conversation_threads
+- conversation_messages
+- call_logs
+- call_sessions
+- meta_lead_capture_events
+- whatsapp_payment_configuration_events
+- credit_ledger
+- email_campaigns
+- user_notifications
+- owner_admin_profiles
+
+The migration also adds these plus owner_admin_audit_events, owner_admin_users, and user_platform_settings to the Supabase realtime publication when available.
+
+
+7. OVERVIEW / COMMAND CENTER FEATURES
+
+Route:
+- /dashboard
+
+Frontend file:
+- src/pages/CommandCenter.tsx
+
+API:
+- GET /api/admin/bootstrap
+
+Purpose:
+- Gives owner/admins a global operating summary of the platform.
+
+Displayed KPIs:
+- Total organizations.
+- Active organizations.
+- Total users.
+- Messages sent.
+- Monthly recurring revenue.
+- Churn rate.
+
+Charts:
+- Revenue growth over the last 6 months.
+- New vs churned customers over the last 6 months.
+- Message volume over the last 7 days.
+- Channel usage for WhatsApp, Instagram, and Email.
+
+Alerts:
+- Failed API calls.
+- WhatsApp disconnections.
+- High error rates.
+- Payment failures.
+
+Backend working:
+- Loads app profiles, channels, conversations, messages, calls, lead webhook events, payment webhook events, email campaigns, credit ledger, notifications, email connections, and templates.
+- Lists Supabase auth users with service-role auth.admin.listUsers.
+- Calculates MRR from plan values.
+- Calculates churn rate from active vs churned profiles.
+- Computes 24-hour activity windows for messages, calls, lead webhooks, and email campaigns.
+- Includes system health and recent timeline events in the response.
+
+
+8. ORGANIZATION MANAGEMENT FEATURES
+
+Route:
+- /dashboard/organizations
+
+Frontend file:
+- src/pages/OrganizationsPage.tsx
+
+APIs:
+- GET /api/admin/organizations
+- GET /api/admin/organizations/:orgId
+- POST /api/admin/organizations/:orgId/action
+
+Purpose:
+- Manage workspace organizations, owner accounts, plans, support access, abuse/risk state, billing activity, WhatsApp Business setup, and webhook controls.
+
+List features:
+- Search organizations.
+- Filter by status: all, active, trialing, past_due, suspended, banned, deleted, setup.
+- Filter by plan: starter, growth, scale, enterprise, manual.
+- Summary metrics for total organizations, active organizations, revenue, and risk review count.
+- Table columns for org name, website, WhatsApp details, message tier, plan, users, status, revenue, created date, and actions.
+
+Manage modal features:
+- Impersonate login through a Supabase magic link generated by the backend.
+- Suspend or activate organization.
+- Ban or unban organization owner account through Supabase Auth ban duration.
+- Soft delete organization by marking profile status/billing fields.
+- Change selected plan and billing status.
+- Review risk and abuse signals.
+- View organization detail, usage stats, members, billing history, and recent organization events.
+
+WhatsApp Business controls:
+- View WABA ID, phone number ID, display number, verified/business name, quality rating, messaging limit tier, last sync, token last 4 characters, two-step verification status, sender registration, and display name review status.
+- Check WhatsApp webhook subscription status.
+- Activate WhatsApp webhook subscription.
+- Deactivate webhook locally.
+- Unsubscribe WhatsApp webhook from Meta.
+- Disconnect WABA account by deleting meta_templates and meta_channels rows for the organization.
+- Request phone verification code by SMS or voice through the Meta Graph API.
+
+Backend working:
+- buildOrganizationRows combines app_profiles, auth users, channels, usage records, payment events, credit ledger, and webhook state into organization rows.
+- buildOrganizationDetail adds members, usage stats, billing history, and recent events.
+- Meta webhook actions decrypt stored access tokens, call the Meta Graph API, and persist webhook subscription status back to meta_channels.
+- Every organization action records an admin audit event.
+
+
+9. GLOBAL USERS FEATURES
+
+Route:
+- /dashboard/users
+
+Frontend file:
+- src/pages/UsersPage.tsx
+
+APIs:
+- GET /api/admin/users
+- GET /api/admin/users/:userId
+- PATCH /api/admin/users/:userId/profile
+- POST /api/admin/users/:userId/credits
+- POST /api/admin/users/:userId/notice
+- POST /api/admin/users/:userId/auth
+
+Purpose:
+- View and manage every user/workspace owner across the platform.
+
+List features:
+- Search by user, company, phone, email, or user ID.
+- Filter by billing status.
+- Filter by organization.
+- Summary metrics for global users, active billing, organizations, and risk flags.
+- Abuse/spam detection panel.
+- Directory table with user, organization, billing, channels, activity counts, credits, risk flags, last sign-in, auth state, and actions.
+
+Risk heuristics:
+- Banned user.
+- Billing risk from past_due, suspended, or cancelled.
+- High unpaid usage when free/trial/no plan has high activity.
+- Chat activity without connected channels.
+- High email campaign volume.
+
+User detail features:
+- Auth/profile/channel overview.
+- WhatsApp, Instagram, and Messenger channel status.
+- Counts for conversations, messages, calls, and notices.
+- Recent messages, calls, and email campaigns.
+- Login activity with device, browser, OS, IP, user agent, and raw payload when the auth audit RPC is available.
+- Fallback login activity from auth.users.last_sign_in_at when full audit data is unavailable.
+
+Actions:
+- Update billing fields: plan, billing cycle, billing status, trial end date, coupon code, Razorpay subscription ID.
+- Optionally notify the user after billing updates.
+- Add or deduct credits by inserting credit_ledger rows.
+- Optionally notify the user after credit updates.
+- Send a client-dashboard notice to user_notifications.
+- Ban or unban a user with Supabase Auth admin updateUserById.
+
+Backend working:
+- buildUserRows joins auth users, app_profiles, channel tables, conversations, calls, email campaigns, and credit ledger.
+- User detail loads auth user, app profile, channels, recent conversations/messages/calls/sessions/credits/campaigns/notifications.
+- loadUserLoginActivity calls the get_admin_user_login_activity RPC when available and enriches records with browser, OS, and device parsing.
+- Admin user operations are audited.
+
+
+10. USER PLATFORM SETTINGS FEATURES
+
+Route:
+- /dashboard/platform-settings
+
+Frontend file:
+- src/pages/PlatformSettingsPage.tsx
+
+APIs:
+- GET /api/admin/platform-settings
+- PATCH /api/admin/platform-settings/:section
+
+Purpose:
+- Manage runtime settings used by the main user-facing app.
+
+Tabs:
+- Pricing plans.
+- Feature flags.
+- Rate limits.
+- API keys.
+- Email templates.
+
+Pricing plans:
+- Edit plan name, monthly price, annual price, included credits, and feature list.
+- Mark plans active/inactive.
+- Mark one plan as recommended.
+- Add or remove plans.
+
+Feature flags:
+- Edit flag labels/descriptions.
+- Enable or disable features globally.
+- Add per-organization feature overrides.
+- Defaults include WhatsApp inbox, Instagram inbox, Messenger inbox, voice calls, email campaigns, and API access.
+
+Rate limits:
+- Set default messages per minute.
+- Set default API requests per minute.
+- Add organization-specific rate limit overrides.
+
+API keys:
+- Add, edit, activate/deactivate, and remove server-side API key records.
+- Secrets are masked after save.
+- Blank key inputs keep existing values.
+- New submitted secret values rotate the stored key and update lastRotatedAt.
+- API keys are excluded from the public RPC response.
+
+Email templates:
+- Manage invite user, password reset, magic link, and custom templates.
+- Edit template name, subject, body, and enabled state.
+- Bodies can include placeholders such as {{user_name}}, {{organization_name}}, {{invite_url}}, {{reset_url}}, and {{magic_link}}.
+
+Main app consumption:
+- The migration creates get_user_platform_settings(p_org_id uuid).
+- The RPC returns public runtime settings, hides API keys, and applies org-level feature/rate overrides when an org ID is passed.
+
+Backend working:
+- If user_platform_settings is missing, defaults are returned with a warning.
+- Saves upsert one section at a time.
+- All saved sections are normalized server-side.
+- Admin actions are audited as UPDATE_USER_PLATFORM_SETTINGS.
+
+
+11. LOGS & MONITORING FEATURES
+
+Route:
+- /dashboard/logs-monitoring
+
+Frontend file:
+- src/pages/LogsMonitoringPage.tsx
+
+APIs:
+- GET /api/admin/logs
+- GET /api/admin/server
+- GET /api/admin/audit
+
+Purpose:
+- Consolidated operations screen for API logs, error logs, webhook logs, message delivery logs, server status, and security audit history.
+
+Tabs:
+- API logs.
+- Error logs.
+- Webhook logs.
+- Message delivery logs.
+- Server Status.
+- Security Audit.
+
+Log-table features:
+- Search logs by org_id.
+- Filter by error type.
+- Select a row to see source, category, org, user, status, detail, and raw JSON payload.
+
+API logs include:
+- Meta Lead API events.
+- WhatsApp Payments API events.
+- Calling API events.
+
+Webhook logs include:
+- Meta lead webhook events.
+- WhatsApp payment webhook events.
+- Recent live webhook/message/call events.
+
+Message delivery logs include:
+- Recent conversation_messages mapped as messaging delivery records.
+
+Error logs include:
+- Critical/error API logs.
+- Critical/error webhook logs.
+- Critical/error message delivery logs.
+- Data-load warnings.
+- Client API health failures.
+
+Server Status tab:
+- Shows server health status, DB latency, realtime status, subscriber count, recent event count, memory usage, environment checks, and table counts.
+
+Security Audit tab:
+- Shows persisted owner_admin_audit_events rows.
+- Shows live admin/server events count.
+- Displays admin email/user, target user, action name, timestamp, and metadata.
+
+Backend working:
+- buildLogsMonitoring normalizes records from lead events, payment events, call sessions, messages, recent live events, load warnings, and client API health.
+- /api/admin/logs is accessible to admins with any of logs_monitoring, webhooks, server_status, or security_audit permissions.
+- /api/admin/server and /api/admin/audit are also fetched when allowed; failures are tolerated in the UI.
+
+
+12. GLOBAL INTEGRATIONS FEATURES
+
+Route:
+- /dashboard/global-integrations
+
+Frontend file:
+- src/pages/GlobalIntegrationsPage.tsx
+
+API:
+- GET /api/admin/integrations
+
+Purpose:
+- Show global health for WhatsApp, Instagram, and Email integrations.
+
+Displayed integration cards:
+- WhatsApp API Health.
+- Instagram API Status.
+- Email Service Status.
+
+Metrics:
+- Channel/connection counts.
+- Disconnected/unhealthy counts.
+- Webhook events.
+- API health signal.
+- Failed email campaigns.
+
+Client API Signal:
+- Displays raw CLIENT_API_BASE_URL /health check response when configured.
+- Shows empty-state guidance when CLIENT_API_BASE_URL is not configured.
+
+Backend working:
+- buildGlobalIntegrations calculates healthy/degraded/not-configured status from channel status fields and email campaign failures.
+- Client API health is checked with a 4 second timeout.
+
+
+13. BILLING AND CREDIT CONTROL FEATURES
+
+Route:
+- /dashboard/payments
+
+Frontend file:
+- src/pages/PaymentsPage.tsx
+
+API:
+- GET /api/admin/payments
+
+Purpose:
+- Monitor subscription state, Razorpay references, payment methods, WhatsApp credits, and payment webhook activity.
+
+Summary metrics:
+- Billing profiles.
+- Active subscriptions.
+- Trialing workspaces.
+- Credit ledger balance.
+- Ledger additions.
+- Ledger deductions.
+
+Panels:
+- Billing status breakdown.
+- Plan breakdown.
+- Workspace subscriptions.
+- Recent credit ledger.
+- Payment webhooks.
+
+Workspace subscriptions table:
+- Workspace name/email/user ID.
+- Selected plan.
+- Billing status.
+- Billing cycle.
+- Payment method details.
+- Razorpay subscription ID.
+
+Payment method enrichment:
+- If Razorpay credentials are configured, the backend can fetch subscription invoice/payment details.
+- It maps card, UPI, wallet, netbanking, EMI, paylater, and unknown methods into displayable labels/details.
+- If Razorpay lookup fails, the error is attached to the payment method detail.
+
+Backend working:
+- Reads app_profiles, credit_ledger, and whatsapp_payment_configuration_events.
+- Computes billing and plan breakdowns.
+- Computes ledger balance from additions minus deductions.
+- Enriches profiles with payment method details from Razorpay when possible.
+
+
+14. ADMIN PROFILE AND DASHBOARD ADMIN MANAGEMENT FEATURES
+
+Route:
+- /dashboard/settings
+
+Frontend file:
+- src/pages/OwnerSettingsPage.tsx
+
+APIs:
+- GET /api/admin/settings
+- PATCH /api/admin/settings/profile
+- POST /api/admin/settings/profile-photo
+- PATCH /api/admin/settings/account
+- GET /api/admin/admin-users
+- POST /api/admin/admin-users/invite
+- PATCH /api/admin/admin-users/:id
+- DELETE /api/admin/admin-users/:id
+
+Purpose:
+- Manage the current admin identity, owner organization details, login/security settings, dashboard admin users, feature permissions, and internal notification preferences.
+
+Tabs:
+- Profile Management.
+- Organization Management.
+- Security.
+- User Management.
+- Notifications.
+
+Profile Management:
+- Upload profile picture as PNG/JPEG/WEBP up to 5 MB.
+- Save full name.
+- Save contact number.
+- Save owner email.
+- The UI broadcasts owner-profile-updated so the layout avatar/name refreshes immediately.
+
+Organization Management:
+- Save organization name.
+- Save organization website.
+- Save role title.
+- Save timezone.
+- Shows an admin card preview.
+
+Security:
+- Update login email.
+- Update password, minimum 8 characters.
+- Shows email confirmation time, last sign-in, account creation, banned/active auth state, dashboard role, primary owner email, and enabled feature count.
+
+User Management:
+- Only visible/usable when access.canManageAdmins is true, which is primary owner access.
+- Invite dashboard admins by email, name, role title, and selected permissions.
+- Prefill invite details from existing organization users with email addresses.
+- List dashboard admins with status, last sign-in, and permission assignments.
+- Edit non-owner admins' full name, role title, status, and permissions.
+- Remove non-owner admins.
+- Primary owner is shown with full access and cannot be modified/removed.
+
+Notifications:
+- Live event sound.
+- Critical webhook alerts.
+- Billing alerts.
+- Server alerts.
+- Weekly operations digest.
+
+Backend working:
+- Owner profile data is persisted in owner_admin_profiles.
+- Profile photo uploads go to the owner-admin-profile-pictures Supabase Storage bucket and save the public URL.
+- Login updates use Supabase Auth admin.updateUserById.
+- Dashboard admin invites use Supabase Auth admin.inviteUserByEmail when the auth user does not already exist.
+- owner_admin_users stores admin roles, statuses, permission arrays, invitation metadata, and auth_user_id links.
+- Admin management is primary-owner-only.
+- All profile, account, and admin-user changes are audited.
+
+
+15. WEBHOOK MONITOR FEATURES PRESENT IN CODE
+
+Current route status:
+- App.tsx redirects /dashboard/webhooks to /dashboard/logs-monitoring.
+- A standalone WebhooksPage component still exists and may be re-enabled later.
+
+Frontend file:
+- src/pages/WebhooksPage.tsx
+
+API:
+- GET /api/admin/webhooks
+
+Standalone page capabilities:
+- Summary cards for lead configs, events in 24h, failed events, and Messenger errors.
+- Webhook URL reference cards with provider, methods, purpose, verify token source, supported events, copy URL, and open URL buttons.
+- Meta lead capture configuration list.
+- Messenger channel configuration list.
+- Webhook event stream with detailed JSON payload panel.
+- Condensed live feed.
+
+Webhook references built by backend:
+- WhatsApp Cloud API webhook: CLIENT_API_BASE_URL/meta/webhook.
+- Messenger webhook: CLIENT_API_BASE_URL/meta/messenger/webhook.
+- Messenger webhook alias: CLIENT_API_BASE_URL/messenger/webhook.
+- Meta Lead Ads webhook: CLIENT_API_BASE_URL/meta/lead-capture/webhook.
+- WhatsApp Payments data endpoint: external, not a fixed Connektly route.
+
+
+16. SERVER STATUS FEATURES PRESENT IN CODE
+
+Current route status:
+- App.tsx redirects /dashboard/server to /dashboard/logs-monitoring.
+- A standalone ServerStatusPage component still exists and may be re-enabled later.
+
+Frontend file:
+- src/pages/ServerStatusPage.tsx
+
+API:
+- GET /api/admin/server
+
+Standalone page capabilities:
+- Status, DB latency, realtime status, subscriber count, memory usage.
+- Environment checks.
+- Client API health panel.
+- Supabase table counts.
+- Recent server-side live events.
+
+
+17. AUDIT FEATURES PRESENT IN CODE
+
+Current route status:
+- App.tsx redirects /dashboard/audit to /dashboard/logs-monitoring.
+- A standalone AuditPage component still exists and may be re-enabled later.
+
+Frontend file:
+- src/pages/AuditPage.tsx
+
+API:
+- GET /api/admin/audit
+
+Standalone page capabilities:
+- Persisted audit row count.
+- Live admin action count.
+- Operational event count.
+- Live admin action stream.
+- Persisted audit log with action, admin, target, timestamp, and metadata JSON.
+
+
+18. ADMIN API ENDPOINT MAP
+
+Health:
+- GET /api/health: Basic service health and uptime.
+
+Admin identity/settings:
+- GET /api/admin/me: Current admin identity and access summary.
+- GET /api/admin/settings: Owner/admin profile, security, allowlist, and access summary.
+- PATCH /api/admin/settings/profile: Update owner profile fields and auth metadata.
+- POST /api/admin/settings/profile-photo: Upload owner profile image and save avatar URL.
+- PATCH /api/admin/settings/account: Update login email and/or password.
+
+Dashboard admin users:
+- GET /api/admin/admin-users: List dashboard admins and permission definitions, primary owner only.
+- POST /api/admin/admin-users/invite: Invite or link dashboard admin, primary owner only.
+- PATCH /api/admin/admin-users/:id: Update dashboard admin profile/status/permissions, primary owner only.
+- DELETE /api/admin/admin-users/:id: Remove dashboard admin, primary owner only.
+
+Platform settings:
+- GET /api/admin/platform-settings: Load pricing, feature flags, rate limits, API keys, and email templates.
+- PATCH /api/admin/platform-settings/:section: Save one platform settings section.
+
+Dashboard overview:
+- GET /api/admin/bootstrap: Command Center overview, health, charts, alerts, timeline, recent users.
+
+Logs/monitoring:
+- GET /api/admin/logs: API, error, webhook, and message delivery logs.
+- GET /api/admin/server: Server health, table counts, and recent events.
+- GET /api/admin/audit: Persisted audit rows and live event buffer.
+- GET /api/admin/live: Authenticated SSE live event stream.
+
+Integrations:
+- GET /api/admin/integrations: WhatsApp, Instagram, Email, and client API health.
+
+Organizations:
+- GET /api/admin/organizations: Search/filter organization rows and summary.
+- GET /api/admin/organizations/:orgId: Organization detail.
+- POST /api/admin/organizations/:orgId/action: Organization actions including suspend, activate, delete, ban, unban, update_plan, impersonate, check_webhook, activate_webhook, deactivate_webhook, unsubscribe_webhook, disconnect_waba, and request_phone_code.
+
+Users:
+- GET /api/admin/users: Search/filter global users.
+- GET /api/admin/users/:userId: User detail and recent activity.
+- PATCH /api/admin/users/:userId/profile: Update allowed app_profiles fields.
+- POST /api/admin/users/:userId/credits: Add or deduct credits.
+- POST /api/admin/users/:userId/notice: Send user notification.
+- POST /api/admin/users/:userId/auth: Ban or unban user.
+
+Payments/webhooks:
+- GET /api/admin/payments: Billing summaries, subscriptions, credit ledger, and payment webhooks.
+- GET /api/admin/webhooks: Webhook references, configs, and event stream data.
+
+
+19. SUPABASE MIGRATION / DATABASE SUPPORT
+
+Migration file:
+- supabase/admin_dashboard.sql
+
+Creates:
+- owner_admin_audit_events: Persisted admin action log.
+- owner_admin_profiles: Owner/admin profile settings.
+- owner_admin_users: Dashboard admin access rows, roles, statuses, permissions, and invite metadata.
+- user_platform_settings: Runtime platform settings by section.
+- owner-admin-profile-pictures storage bucket.
+
+Security:
+- RLS is enabled on admin tables.
+- Policies deny direct client access with using(false) and with check(false).
+- The dashboard server uses the service role key for admin table reads/writes.
+
+Seed behavior:
+- Inserts/updates the primary owner row for admin@connektly.in by default.
+- Links primary owner auth_user_id to auth.users when matching email exists.
+
+RPCs:
+- get_user_platform_settings(p_org_id uuid default null):
+  - Returns public platform settings for the main app.
+  - Excludes API keys.
+  - Applies organization-specific feature flag and rate limit overrides.
+- get_admin_user_login_activity(p_user_id uuid, p_limit integer default 100):
+  - Reads auth.audit_log_entries through a security-definer function.
+  - Extracts event type, IP address, user agent, device, and raw payload.
+
+Realtime:
+- Adds admin and app tables to supabase_realtime publication when publication exists.
+
+
+20. DATA SOURCES USED BY THE ADMIN BACKEND
+
+Supabase Auth:
+- auth.users through service role auth.admin methods.
+- auth audit logs through get_admin_user_login_activity RPC.
+
+Application tables:
+- app_profiles
+- meta_channels
+- instagram_channels
+- messenger_channels
+- conversation_threads
+- conversation_messages
+- call_logs
+- call_sessions
+- meta_lead_capture_events
+- whatsapp_payment_configuration_events
+- credit_ledger
+- user_notifications
+- email_campaigns
+- email_connections
+- meta_templates
+
+Admin tables:
+- owner_admin_audit_events
+- owner_admin_profiles
+- owner_admin_users
+- user_platform_settings
+
+Storage:
+- owner-admin-profile-pictures
+
+External checks/integrations:
+- CLIENT_API_BASE_URL /health
+- Meta Graph API for WhatsApp webhook subscription and phone verification code actions
+- Razorpay API for payment method enrichment when credentials are configured
+
+
+21. AUDITING AND SAFETY BEHAVIOR
+
+Audited actions include:
+- Owner profile update.
+- Owner profile photo update.
+- Owner account/login update.
+- Dashboard admin invite/update/remove.
+- User platform setting update.
+- Organization actions.
+- User profile update.
+- User credit adjustment.
+- User notice send.
+- User ban/unban.
+
+How audit works:
+- recordAdminAudit pushes a live owner-dashboard event immediately.
+- It also tries to insert into owner_admin_audit_events.
+- If the audit table is missing, the live event still works and the persisted insert is silently skipped.
+
+Safety checks:
+- Protected routes require a valid Supabase session and admin API verification.
+- Admin APIs require bearer token.
+- Feature endpoints require specific permissions.
+- Admin-user management requires primary owner.
+- Profile photo type and size are validated client-side and parsed server-side.
+- Password changes require minimum length.
+- Credit adjustments require positive amount.
+- User notices require title and body.
+- Organization delete, WABA disconnect, and webhook unsubscribe ask for browser confirmation.
+- Secrets are masked in platform settings responses.
+
+
+22. CURRENT IMPLEMENTATION NOTES
+
+- The admin panel is not only a read-only dashboard. It performs privileged writes through the service-role backend.
+- Most list views are client-triggered refresh screens rather than polling pages.
+- Live events stream through SSE and are backed by the server process memory buffer plus Supabase realtime.
+- If the server restarts, live event buffer is reset, but persisted audit rows remain if the migration was applied.
+- Some API responses tolerate missing optional tables by returning empty rows and warnings.
+- User Platform Settings continue to return defaults if the settings table has not been applied, but saving requires the migration.
+- Logs & Monitoring is the currently routed home for webhooks, server status, and audit views.
+- The header search input is visual only in AdminLayout; it is not wired to global search behavior in the current code.
+- Turnstile support exists on login, with local/production site key handling in src/lib/config.ts.
+- CLIENT_API_BASE_URL is optional, but without it the client API health and generated webhook URL references are limited.
+
+
+23. QUICK FILE MAP
+
+Frontend entry:
+- src/main.tsx
+- src/App.tsx
+
+Layout/components:
+- src/components/AdminLayout.tsx
+- src/components/LiveEventFeed.tsx
+- src/components/MetricCard.tsx
+- src/components/Panel.tsx
+- src/components/StatusBadge.tsx
+- src/components/Modal.tsx
+- src/components/TurnstileWidget.tsx
+- src/components/BrandMark.tsx
+
+Frontend libraries:
+- src/lib/adminApi.ts
+- src/lib/config.ts
+- src/lib/supabase.ts
+- src/lib/liveEvents.tsx
+- src/lib/types.ts
+- src/lib/format.ts
+
+Pages:
+- src/pages/CommandCenter.tsx
+- src/pages/OrganizationsPage.tsx
+- src/pages/UsersPage.tsx
+- src/pages/PlatformSettingsPage.tsx
+- src/pages/LogsMonitoringPage.tsx
+- src/pages/GlobalIntegrationsPage.tsx
+- src/pages/PaymentsPage.tsx
+- src/pages/OwnerSettingsPage.tsx
+- src/pages/WebhooksPage.tsx
+- src/pages/ServerStatusPage.tsx
+- src/pages/AuditPage.tsx
+
+Backend and migration:
+- server.ts
+- server.js
+- supabase/admin_dashboard.sql
+

@@ -1,4 +1,5 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
@@ -17,10 +18,12 @@ type AdminPermissionKey =
   | 'command_center'
   | 'organizations'
   | 'global_users'
+  | 'plan_management'
   | 'platform_settings'
   | 'payments'
   | 'logs_monitoring'
   | 'global_integrations'
+  | 'website_management'
   | 'webhooks'
   | 'server_status'
   | 'security_audit';
@@ -59,12 +62,32 @@ type LivePayload = {
   payload?: unknown;
 };
 
+type ClientFeatureKey =
+  | 'whatsapp'
+  | 'instagram'
+  | 'messenger'
+  | 'meta_ads'
+  | 'meta_lead_capture'
+  | 'whatsapp_payments'
+  | 'woocommerce'
+  | 'email'
+  | 'email_templates'
+  | 'whatsapp_flows'
+  | 'automations'
+  | 'developer_tools'
+  | 'workspace_team'
+  | 'notifications';
+
 const app = express();
 const port = Number(process.env.PORT || 8787);
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const clientApiBaseUrl = process.env.CLIENT_API_BASE_URL || '';
+const websiteContentRoot = path.resolve(process.env.WEBSITE_CONTENT_ROOT || path.join(__dirname, '..', 'www.connektly.in'));
+const websitePublicBaseUrl = (process.env.WEBSITE_PUBLIC_BASE_URL || process.env.WEBSITE_API_BASE_URL || 'http://localhost:3001')
+  .replace(/\/api\/?$/, '')
+  .replace(/\/$/, '');
 const allowedEmails = new Set(
   (process.env.ADMIN_ALLOWED_EMAILS || '')
     .split(',')
@@ -536,10 +559,12 @@ const adminPermissionCatalog: Array<{ key: AdminPermissionKey; label: string; de
   { key: 'command_center', label: 'Overview', description: 'View dashboard overview, health, and realtime operations.' },
   { key: 'organizations', label: 'Organization Management', description: 'View and manage organizations, plans, suspension, and impersonation.' },
   { key: 'global_users', label: 'Global Users', description: 'View and manage users across every organization.' },
+  { key: 'plan_management', label: 'Plan Management', description: 'Create and manage global pricing plans used by the website and app.' },
   { key: 'platform_settings', label: 'User Platform Settings', description: 'Control pricing, feature flags, limits, API keys, and email templates.' },
   { key: 'payments', label: 'Payments', description: 'View billing, credit ledger, revenue, and payment activity.' },
   { key: 'logs_monitoring', label: 'Logs & Monitoring', description: 'View API logs, error logs, webhook logs, delivery logs, server status, and audit history.' },
   { key: 'global_integrations', label: 'Global Integrations', description: 'View WhatsApp, Instagram, and email service health.' },
+  { key: 'website_management', label: 'Website Management', description: 'Manage public website blog posts and Help Center articles.' },
   { key: 'webhooks', label: 'Webhooks Live', description: 'View webhook configuration and realtime webhook activity.' },
   { key: 'server_status', label: 'Server Status', description: 'View service health, table counts, and backend status.' },
   { key: 'security_audit', label: 'Security Audit', description: 'View persisted admin audit activity.' },
@@ -591,7 +616,15 @@ const defaultPlatformSettings = {
       { key: 'instagram_inbox', label: 'Instagram Inbox', description: 'Enable Instagram DM support.', enabled: true },
       { key: 'messenger_inbox', label: 'Messenger Inbox', description: 'Enable Facebook Messenger support.', enabled: true },
       { key: 'voice_calls', label: 'Voice Calls', description: 'Enable calling and call logs.', enabled: true },
+      { key: 'whatsapp_flows', label: 'WhatsApp Flows', description: 'Enable WhatsApp Flow creation, publishing, and submissions.', enabled: true },
+      { key: 'automation_rules', label: 'Automation Rules', description: 'Enable keyword triggers, flow actions, and conversational automation.', enabled: true },
+      { key: 'meta_ads', label: 'Meta Ads Manager', description: 'Enable Meta Ads account setup, campaign monitoring, and campaign status controls.', enabled: true },
+      { key: 'meta_lead_capture', label: 'Meta Lead Capture', description: 'Enable Page/form lead webhook ingestion into CRM leads.', enabled: true },
       { key: 'email_campaigns', label: 'Email Campaigns', description: 'Enable campaign sending tools.', enabled: true },
+      { key: 'email_inbox', label: 'Email Inbox', description: 'Enable IMAP email inbox sync and notifications.', enabled: true },
+      { key: 'whatsapp_payments', label: 'WhatsApp Payments', description: 'Enable WhatsApp payment configuration setup and event monitoring.', enabled: true },
+      { key: 'woocommerce', label: 'WooCommerce', description: 'Enable WooCommerce connection and automated order messages.', enabled: true },
+      { key: 'workspace_team', label: 'Workspace Team', description: 'Enable team invitations and member management inside workspaces.', enabled: true },
       { key: 'api_access', label: 'API Access', description: 'Enable public API access for integrations.', enabled: false },
     ],
     orgOverrides: [],
@@ -1074,6 +1107,25 @@ async function savePlatformSettingsSection(admin: AdminContext | undefined, sect
 
   await recordAdminAudit(admin, 'UPDATE_USER_PLATFORM_SETTINGS', null, { section });
   return loadPlatformSettings();
+}
+
+function buildPublicPricingPlans(settings: Record<PlatformSettingsSection, any>) {
+  const plans = Array.isArray(settings.pricing_plans?.plans) ? settings.pricing_plans.plans : [];
+  return plans
+    .map((plan: any) => ({
+      id: normalizeString(plan.id) || normalizeString(plan.name)?.toLowerCase().replace(/[^a-z0-9]+/g, '_') || '',
+      name: normalizeString(plan.name) || 'Untitled plan',
+      currency: normalizeString(plan.currency) || 'INR',
+      monthlyPrice: normalizeNumber(plan.monthlyPrice),
+      annualPrice: normalizeNumber(plan.annualPrice),
+      credits: normalizeNumber(plan.credits),
+      features: Array.isArray(plan.features)
+        ? plan.features.map((feature: unknown) => normalizeString(feature)).filter(Boolean)
+        : [],
+      isActive: Boolean(plan.isActive),
+      isRecommended: Boolean(plan.isRecommended),
+    }))
+    .filter((plan: { id: string; isActive: boolean }) => plan.id && plan.isActive);
 }
 
 async function updateAdminUserMetadata(admin: AdminContext, updates: JsonRecord) {
@@ -2277,6 +2329,12 @@ function startRealtimeBridge() {
     'meta_channels',
     'instagram_channels',
     'messenger_channels',
+    'meta_ads_integrations',
+    'meta_lead_capture_configs',
+    'meta_flows',
+    'flow_submissions',
+    'meta_conversational_automation_configs',
+    'automation_rules',
     'conversation_threads',
     'conversation_messages',
     'call_logs',
@@ -2284,8 +2342,15 @@ function startRealtimeBridge() {
     'meta_lead_capture_events',
     'whatsapp_payment_configuration_events',
     'credit_ledger',
+    'email_connections',
+    'email_templates',
     'email_campaigns',
+    'woocommerce_connections',
+    'developer_api_credentials',
+    'developer_webhook_endpoints',
+    'workspace_team_members',
     'user_notifications',
+    'user_notification_preferences',
     'owner_admin_profiles',
   ];
 
@@ -2351,6 +2416,12 @@ async function loadCoreData() {
     metaChannels,
     instagramChannels,
     messengerChannels,
+    metaAdsIntegrations,
+    metaLeadCaptureConfigs,
+    metaFlows,
+    flowSubmissions,
+    conversationalAutomationConfigs,
+    automationRules,
     threads,
     messages,
     callLogs,
@@ -2360,13 +2431,25 @@ async function loadCoreData() {
     emailCampaigns,
     creditLedger,
     notifications,
+    notificationPreferences,
     emailConnections,
+    emailTemplates,
+    woocommerceConnections,
+    developerApiCredentials,
+    developerWebhookEndpoints,
+    workspaceTeamMembers,
     templates,
   ] = await Promise.all([
     safeSelect('app_profiles', '*', (query: any) => query.order('created_at', { ascending: false }).limit(1000)),
     safeSelect('meta_channels', '*'),
     safeSelect('instagram_channels', '*'),
     safeSelect('messenger_channels', '*'),
+    safeSelect('meta_ads_integrations', '*'),
+    safeSelect('meta_lead_capture_configs', '*'),
+    safeSelect('meta_flows', '*', (query: any) => query.order('updated_at', { ascending: false }).limit(1000)),
+    safeSelect('flow_submissions', '*', (query: any) => query.order('submitted_at', { ascending: false }).limit(1000)),
+    safeSelect('meta_conversational_automation_configs', '*'),
+    safeSelect('automation_rules', '*', (query: any) => query.order('updated_at', { ascending: false }).limit(1000)),
     safeSelect('conversation_threads', '*', (query: any) => query.order('updated_at', { ascending: false }).limit(1000)),
     safeSelect('conversation_messages', '*', (query: any) => query.order('created_at', { ascending: false }).limit(1000)),
     safeSelect('call_logs', '*', (query: any) => query.order('created_at', { ascending: false }).limit(1000)),
@@ -2378,7 +2461,13 @@ async function loadCoreData() {
     safeSelect('email_campaigns', '*', (query: any) => query.order('created_at', { ascending: false }).limit(1000)),
     safeSelect('credit_ledger', '*', (query: any) => query.order('created_at', { ascending: false }).limit(2000)),
     safeSelect('user_notifications', '*', (query: any) => query.order('created_at', { ascending: false }).limit(500)),
+    safeSelect('user_notification_preferences', '*'),
     safeSelect('email_connections', '*'),
+    safeSelect('email_templates', '*', (query: any) => query.order('updated_at', { ascending: false }).limit(1000)),
+    safeSelect('woocommerce_connections', '*'),
+    safeSelect('developer_api_credentials', '*', (query: any) => query.order('updated_at', { ascending: false }).limit(1000)),
+    safeSelect('developer_webhook_endpoints', '*', (query: any) => query.order('updated_at', { ascending: false }).limit(1000)),
+    safeSelect('workspace_team_members', '*', (query: any) => query.order('updated_at', { ascending: false }).limit(1000)),
     safeSelect('meta_templates', '*', (query: any) => query.order('updated_at', { ascending: false }).limit(1000)),
   ]);
 
@@ -2387,6 +2476,12 @@ async function loadCoreData() {
     metaChannels: metaChannels.rows,
     instagramChannels: instagramChannels.rows,
     messengerChannels: messengerChannels.rows,
+    metaAdsIntegrations: metaAdsIntegrations.rows,
+    metaLeadCaptureConfigs: metaLeadCaptureConfigs.rows,
+    metaFlows: metaFlows.rows,
+    flowSubmissions: flowSubmissions.rows,
+    conversationalAutomationConfigs: conversationalAutomationConfigs.rows,
+    automationRules: automationRules.rows,
     threads: threads.rows,
     messages: messages.rows,
     callLogs: callLogs.rows,
@@ -2396,13 +2491,25 @@ async function loadCoreData() {
     emailCampaigns: emailCampaigns.rows,
     creditLedger: creditLedger.rows,
     notifications: notifications.rows,
+    notificationPreferences: notificationPreferences.rows,
     emailConnections: emailConnections.rows,
+    emailTemplates: emailTemplates.rows,
+    woocommerceConnections: woocommerceConnections.rows,
+    developerApiCredentials: developerApiCredentials.rows,
+    developerWebhookEndpoints: developerWebhookEndpoints.rows,
+    workspaceTeamMembers: workspaceTeamMembers.rows,
     templates: templates.rows,
     errors: [
       profiles.error,
       metaChannels.error,
       instagramChannels.error,
       messengerChannels.error,
+      metaAdsIntegrations.error,
+      metaLeadCaptureConfigs.error,
+      metaFlows.error,
+      flowSubmissions.error,
+      conversationalAutomationConfigs.error,
+      automationRules.error,
       threads.error,
       messages.error,
       callLogs.error,
@@ -2412,7 +2519,13 @@ async function loadCoreData() {
       emailCampaigns.error,
       creditLedger.error,
       notifications.error,
+      notificationPreferences.error,
       emailConnections.error,
+      emailTemplates.error,
+      woocommerceConnections.error,
+      developerApiCredentials.error,
+      developerWebhookEndpoints.error,
+      workspaceTeamMembers.error,
       templates.error,
     ].filter(Boolean),
   };
@@ -2426,6 +2539,9 @@ function buildTimeline(core: Awaited<ReturnType<typeof loadCoreData>>) {
     ...core.paymentEvents
       .slice(0, 30)
       .map((row) => mapLivePayload('whatsapp_payment_configuration_events', { eventType: 'INSERT', new: row })),
+    ...core.flowSubmissions.slice(0, 20).map((row) => mapLivePayload('flow_submissions', { eventType: 'INSERT', new: row })),
+    ...core.emailCampaigns.slice(0, 20).map((row) => mapLivePayload('email_campaigns', { eventType: 'INSERT', new: row })),
+    ...core.automationRules.slice(0, 20).map((row) => mapLivePayload('automation_rules', { eventType: 'UPDATE', new: row })),
     ...core.creditLedger.slice(0, 30).map((row) => mapLivePayload('credit_ledger', { eventType: 'INSERT', new: row })),
     ...recentLiveEvents.slice(0, 30),
   ];
@@ -2921,8 +3037,1004 @@ function buildGlobalIntegrations(core: Awaited<ReturnType<typeof loadCoreData>>,
   };
 }
 
+const clientFeatureCatalog: Record<
+  ClientFeatureKey,
+  {
+    label: string;
+    category: string;
+    description: string;
+    route: string;
+  }
+> = {
+  whatsapp: {
+    label: 'WhatsApp Channel',
+    category: 'Channels',
+    description: 'WhatsApp inbox, templates, calls, business profile, commerce, and webhook state.',
+    route: '/dashboard/channels',
+  },
+  instagram: {
+    label: 'Instagram Inbox',
+    category: 'Channels',
+    description: 'Instagram business login, DM inbox connection, and Page webhook state.',
+    route: '/dashboard/connections?integration=instagram',
+  },
+  messenger: {
+    label: 'Messenger Inbox',
+    category: 'Channels',
+    description: 'Facebook Page Messenger connection and subscribed webhook fields.',
+    route: '/dashboard/connections?integration=messenger',
+  },
+  meta_ads: {
+    label: 'Meta Ads Manager',
+    category: 'Campaigns',
+    description: 'Meta Ads Page/ad-account connection used by campaign manager and media library.',
+    route: '/dashboard/ads/meta-ads-manager',
+  },
+  meta_lead_capture: {
+    label: 'Meta Lead Capture',
+    category: 'CRM',
+    description: 'Page/form lead ingestion configuration and lead webhook processing.',
+    route: '/dashboard/connections?integration=meta-lead-capture',
+  },
+  whatsapp_payments: {
+    label: 'WhatsApp Payments',
+    category: 'Commerce',
+    description: 'Payment configuration update events and provider setup signals.',
+    route: '/dashboard/connections?integration=whatsapp-payments',
+  },
+  woocommerce: {
+    label: 'WooCommerce',
+    category: 'Commerce',
+    description: 'WooCommerce store connection, webhook secret, and automated order messages.',
+    route: '/dashboard/connections?integration=woocommerce',
+  },
+  email: {
+    label: 'Email Inbox',
+    category: 'Email',
+    description: 'SMTP/IMAP mailbox connection used by email inbox and email campaign sending.',
+    route: '/dashboard/inbox/email',
+  },
+  email_templates: {
+    label: 'Email Templates',
+    category: 'Email',
+    description: 'Workspace email templates used by the template builder and campaigns.',
+    route: '/dashboard/emails/template-builder',
+  },
+  whatsapp_flows: {
+    label: 'WhatsApp Flows',
+    category: 'Automation',
+    description: 'Flow definitions, publish state, previews, and captured flow submissions.',
+    route: '/dashboard/automations/flows',
+  },
+  automations: {
+    label: 'Automation Rules',
+    category: 'Automation',
+    description: 'Keyword triggers, flow actions, and conversational automation commands.',
+    route: '/dashboard/automations/triggers',
+  },
+  developer_tools: {
+    label: 'Developer Tools',
+    category: 'Developer',
+    description: 'Developer API credentials, webhook endpoints, and delivery state.',
+    route: '/dashboard/developer/api',
+  },
+  workspace_team: {
+    label: 'Workspace Team',
+    category: 'Workspace',
+    description: 'Invited and active team members for each customer workspace.',
+    route: '/dashboard/settings',
+  },
+  notifications: {
+    label: 'Notification Preferences',
+    category: 'Workspace',
+    description: 'Per-workspace notification channels, sound settings, and alert preferences.',
+    route: '/dashboard/settings',
+  },
+};
+
+const clientFeatureKeys = Object.keys(clientFeatureCatalog) as ClientFeatureKey[];
+
+const clientFeatureStatusControls: Partial<
+  Record<ClientFeatureKey, { table: string; statuses: string[]; userColumn?: string }>
+> = {
+  whatsapp: { table: 'meta_channels', statuses: ['connected', 'error', 'disconnected'] },
+  instagram: { table: 'instagram_channels', statuses: ['connected', 'error', 'disconnected'] },
+  messenger: { table: 'messenger_channels', statuses: ['connected', 'error', 'disconnected'] },
+  meta_ads: { table: 'meta_ads_integrations', statuses: ['ready', 'draft', 'error', 'disabled'] },
+  meta_lead_capture: { table: 'meta_lead_capture_configs', statuses: ['active', 'draft', 'error', 'disabled'] },
+  email: { table: 'email_connections', statuses: ['connected', 'error', 'disconnected'] },
+  woocommerce: { table: 'woocommerce_connections', statuses: ['connected', 'error', 'disconnected'] },
+  notifications: { table: 'user_notification_preferences', statuses: ['enabled', 'disabled'] },
+};
+
+function normalizeClientFeatureKey(value: unknown): ClientFeatureKey | null {
+  const key = normalizeString(value) as ClientFeatureKey | null;
+  return key && clientFeatureKeys.includes(key) ? key : null;
+}
+
+function groupRowsByOwner(rows: JsonRecord[], ownerResolver: (row: JsonRecord) => string | null = rowOwnerUserId) {
+  const groups = new Map<string, JsonRecord[]>();
+  for (const row of rows) {
+    const ownerId = ownerResolver(row);
+    if (!ownerId) continue;
+    groups.set(ownerId, [...(groups.get(ownerId) || []), row]);
+  }
+  return groups;
+}
+
+function collectGroupOwnerIds(...groups: Array<Map<string, JsonRecord[]>>) {
+  const ids = new Set<string>();
+  for (const group of groups) {
+    for (const id of group.keys()) {
+      ids.add(id);
+    }
+  }
+  return [...ids];
+}
+
+function getWorkspaceIdentity(
+  userId: string,
+  profileById: Map<string, JsonRecord>,
+  authById: Map<string, User>,
+) {
+  const profile = profileById.get(userId);
+  const authUser = authById.get(userId);
+  return {
+    organizationName:
+      normalizeString(profile?.company_name) ||
+      normalizeString(profile?.full_name) ||
+      normalizeString(authUser?.email) ||
+      compactUserId(userId),
+    ownerName: userDisplayName(profile, authUser),
+    ownerEmail: normalizeString(profile?.email) || authUser?.email || null,
+  };
+}
+
+function compactUserId(value: string) {
+  return value.length > 14 ? `${value.slice(0, 8)}...${value.slice(-4)}` : value;
+}
+
+function getFeatureSeverity(status: unknown, rows: JsonRecord[] = []): LivePayload['severity'] {
+  const text = [
+    status,
+    ...rows.flatMap((row) => [
+      row.status,
+      row.processing_status,
+      row.last_error,
+      row.error_message,
+      row.webhook_last_error,
+      row.failure_reason,
+    ]),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (/fail|error|disconnect|revoked|rejected|timeout|declin|past_due|cancel/.test(text)) {
+    return 'critical';
+  }
+
+  if (/draft|pending|paused|disabled|inactive|missing|partial|invited/.test(text)) {
+    return 'warning';
+  }
+
+  if (/active|connected|ready|enabled|published|verified|subscribed|sent/.test(text)) {
+    return 'success';
+  }
+
+  return 'info';
+}
+
+function isHealthyFeatureStatus(status: unknown) {
+  return getFeatureSeverity(status) === 'success';
+}
+
+function collectFeatureRisks(rows: JsonRecord[], status?: unknown, extras: string[] = []) {
+  const risks = new Set<string>();
+  const severity = getFeatureSeverity(status, rows);
+  if (severity === 'critical') {
+    risks.add('Error or disconnected signal');
+  }
+  if (severity === 'warning') {
+    risks.add('Needs setup or review');
+  }
+
+  for (const row of rows) {
+    const lastError =
+      normalizeString(row.last_error) ||
+      normalizeString(row.error_message) ||
+      normalizeString(row.webhook_last_error) ||
+      normalizeString(row.failure_reason);
+    if (lastError) {
+      risks.add(lastError);
+    }
+  }
+
+  for (const extra of extras) {
+    if (extra) {
+      risks.add(extra);
+    }
+  }
+
+  return [...risks].slice(0, 4);
+}
+
+function countRowsWithStatus(rows: JsonRecord[], pattern: RegExp) {
+  return rows.filter((row) => pattern.test(String(row.status || row.processing_status || row.state || ''))).length;
+}
+
+function latestByUpdatedAt(rows: JsonRecord[]) {
+  return rows
+    .slice()
+    .sort(
+      (left, right) =>
+        Date.parse(String(right.updated_at || right.created_at || right.submitted_at || 0)) -
+        Date.parse(String(left.updated_at || left.created_at || left.submitted_at || 0)),
+    )[0] || null;
+}
+
+function buildClientFeatureOperations(core: Awaited<ReturnType<typeof loadCoreData>>, authUsers: User[]) {
+  const authById = new Map(authUsers.map((user) => [user.id, user]));
+  const profileById = new Map(core.profiles.map((profile) => [String(profile.user_id), profile]));
+  const workspaceIds = new Set<string>([
+    ...authUsers.map((user) => user.id),
+    ...core.profiles.map((profile) => String(profile.user_id)),
+  ]);
+
+  const records: Array<{
+    id: string;
+    featureKey: ClientFeatureKey;
+    featureLabel: string;
+    category: string;
+    userId: string;
+    organizationName: string;
+    ownerName: string;
+    ownerEmail: string | null;
+    status: string;
+    severity: LivePayload['severity'];
+    detail: string;
+    route: string;
+    updatedAt: string | null;
+    metrics: Array<{ label: string; value: string | number }>;
+    risks: string[];
+    canUpdateStatus: boolean;
+    allowedStatuses: string[];
+    raw: unknown;
+  }> = [];
+
+  const addRecord = (input: {
+    featureKey: ClientFeatureKey;
+    userId: string;
+    status: string;
+    detail: string;
+    rows?: JsonRecord[];
+    metrics?: Array<{ label: string; value: string | number }>;
+    risks?: string[];
+    canUpdateStatus?: boolean;
+    updatedAt?: string | null;
+    raw?: unknown;
+  }) => {
+    const catalog = clientFeatureCatalog[input.featureKey];
+    const identity = getWorkspaceIdentity(input.userId, profileById, authById);
+    const rows = input.rows || [];
+    const control = clientFeatureStatusControls[input.featureKey];
+    const severity = getFeatureSeverity(input.status, rows);
+    records.push({
+      id: `${input.featureKey}:${input.userId}`,
+      featureKey: input.featureKey,
+      featureLabel: catalog.label,
+      category: catalog.category,
+      userId: input.userId,
+      organizationName: identity.organizationName,
+      ownerName: identity.ownerName,
+      ownerEmail: identity.ownerEmail,
+      status: input.status,
+      severity,
+      detail: input.detail,
+      route: catalog.route,
+      updatedAt: input.updatedAt ?? latestTimestamp(rows),
+      metrics: input.metrics || [],
+      risks: input.risks || collectFeatureRisks(rows, input.status),
+      canUpdateStatus: Boolean(input.canUpdateStatus ?? control),
+      allowedStatuses: control?.statuses || [],
+      raw: input.raw || (rows.length === 1 ? rows[0] : rows),
+    });
+    workspaceIds.add(input.userId);
+  };
+
+  for (const row of core.metaChannels) {
+    const userId = rowOwnerUserId(row);
+    if (!userId) continue;
+    addRecord({
+      featureKey: 'whatsapp',
+      userId,
+      status: normalizeString(row.status) || 'connected',
+      detail:
+        normalizeString(row.display_phone_number) ||
+        normalizeString(row.verified_name) ||
+        normalizeString(row.phone_number_id) ||
+        'WhatsApp channel connected',
+      rows: [row],
+      metrics: [
+        { label: 'Templates', value: core.templates.filter((item) => rowOwnerUserId(item) === userId).length },
+        { label: 'Messages', value: core.messages.filter((item) => rowOwnerUserId(item) === userId).length },
+        { label: 'Calls', value: core.callSessions.filter((item) => rowOwnerUserId(item) === userId).length },
+      ],
+    });
+  }
+
+  for (const row of core.instagramChannels) {
+    const userId = rowOwnerUserId(row);
+    if (!userId) continue;
+    addRecord({
+      featureKey: 'instagram',
+      userId,
+      status: normalizeString(row.status) || 'connected',
+      detail: normalizeString(row.instagram_username) || normalizeString(row.page_name) || 'Instagram channel connected',
+      rows: [row],
+      metrics: [
+        { label: 'Page', value: normalizeString(row.page_name) || 'Connected' },
+        { label: 'Token', value: normalizeString(row.page_access_token_last4) ? `...${row.page_access_token_last4}` : 'Stored' },
+      ],
+    });
+  }
+
+  for (const row of core.messengerChannels) {
+    const userId = rowOwnerUserId(row);
+    if (!userId) continue;
+    const fields = Array.isArray(row.webhook_fields) ? row.webhook_fields.length : 0;
+    addRecord({
+      featureKey: 'messenger',
+      userId,
+      status: normalizeString(row.status) || (row.webhook_subscribed ? 'connected' : 'pending'),
+      detail: normalizeString(row.page_name) || normalizeString(row.page_id) || 'Messenger Page connected',
+      rows: [row],
+      metrics: [
+        { label: 'Webhook fields', value: fields },
+        { label: 'Subscribed', value: row.webhook_subscribed ? 'Yes' : 'No' },
+      ],
+    });
+  }
+
+  for (const row of core.metaAdsIntegrations) {
+    const userId = rowOwnerUserId(row);
+    if (!userId) continue;
+    addRecord({
+      featureKey: 'meta_ads',
+      userId,
+      status: normalizeString(row.status) || 'draft',
+      detail:
+        normalizeString(row.ad_account_name) ||
+        normalizeString(row.ad_account_id) ||
+        normalizeString(row.page_name) ||
+        'Meta Ads integration saved',
+      rows: [row],
+      metrics: [
+        { label: 'Currency', value: normalizeString(row.currency) || 'N/A' },
+        { label: 'Permissions', value: Array.isArray(row.permissions) ? row.permissions.length : 0 },
+      ],
+    });
+  }
+
+  for (const row of core.metaLeadCaptureConfigs) {
+    const userId = rowOwnerUserId(row);
+    if (!userId) continue;
+    const events = core.leadEvents.filter((event) => rowOwnerUserId(event) === userId);
+    addRecord({
+      featureKey: 'meta_lead_capture',
+      userId,
+      status: normalizeString(row.status) || 'draft',
+      detail: `${Array.isArray(row.page_ids) ? row.page_ids.length : 0} Page IDs, ${Array.isArray(row.form_ids) ? row.form_ids.length : 0} form filters`,
+      rows: [row, ...events],
+      metrics: [
+        { label: 'Events', value: events.length },
+        { label: 'Failed', value: events.filter(isFailedRow).length },
+        { label: 'Auto create', value: row.auto_create_leads === false ? 'No' : 'Yes' },
+      ],
+    });
+  }
+
+  const paymentEventsByUser = groupRowsByOwner(core.paymentEvents);
+  for (const [userId, rows] of paymentEventsByUser) {
+    const latest = latestByUpdatedAt(rows);
+    addRecord({
+      featureKey: 'whatsapp_payments',
+      userId,
+      status: normalizeString(latest?.status) || 'recorded',
+      detail:
+        normalizeString(latest?.configuration_name) ||
+        normalizeString(latest?.provider_name) ||
+        'WhatsApp payment configuration events recorded',
+      rows,
+      metrics: [
+        { label: 'Events', value: rows.length },
+        { label: 'Failed', value: rows.filter(isFailedRow).length },
+        { label: 'Providers', value: new Set(rows.map((row) => normalizeString(row.provider_name)).filter(Boolean)).size },
+      ],
+      canUpdateStatus: false,
+    });
+  }
+
+  for (const row of core.woocommerceConnections) {
+    const userId = rowOwnerUserId(row);
+    if (!userId) continue;
+    const automations = Array.isArray(row.automations) ? row.automations.filter(isRecord) : [];
+    addRecord({
+      featureKey: 'woocommerce',
+      userId,
+      status: normalizeString(row.status) || 'connected',
+      detail: normalizeString(row.store_name) || normalizeString(row.store_url) || 'WooCommerce store connected',
+      rows: [row],
+      metrics: [
+        { label: 'Automations', value: automations.length },
+        { label: 'Enabled', value: automations.filter((item) => Boolean(item.enabled)).length },
+        { label: 'Verified', value: normalizeString(row.last_verified_at) ? 'Yes' : 'No' },
+      ],
+    });
+  }
+
+  const emailConnectionsByUser = groupRowsByOwner(core.emailConnections);
+  const emailTemplatesByUser = groupRowsByOwner(core.emailTemplates);
+  const emailCampaignsByUser = groupRowsByOwner(core.emailCampaigns);
+  for (const userId of collectGroupOwnerIds(emailConnectionsByUser, emailTemplatesByUser, emailCampaignsByUser)) {
+    const connections = emailConnectionsByUser.get(userId) || [];
+    const templates = emailTemplatesByUser.get(userId) || [];
+    const campaigns = emailCampaignsByUser.get(userId) || [];
+    const latestConnection = latestByUpdatedAt(connections);
+    addRecord({
+      featureKey: 'email',
+      userId,
+      status: normalizeString(latestConnection?.status) || (campaigns.length || templates.length ? 'activity_only' : 'not_configured'),
+      detail:
+        normalizeString(latestConnection?.email_address) ||
+        `${templates.length} templates and ${campaigns.length} campaigns without a saved mailbox`,
+      rows: [...connections, ...campaigns],
+      metrics: [
+        { label: 'Connections', value: connections.length },
+        { label: 'Campaigns', value: campaigns.length },
+        { label: 'Failures', value: campaigns.filter(isFailedRow).length },
+      ],
+      canUpdateStatus: connections.length > 0,
+    });
+
+    if (templates.length > 0) {
+      addRecord({
+        featureKey: 'email_templates',
+        userId,
+        status: 'configured',
+        detail: `${templates.length} email templates saved`,
+        rows: templates,
+        metrics: [
+          { label: 'Templates', value: templates.length },
+          { label: 'Campaigns', value: campaigns.length },
+        ],
+        canUpdateStatus: false,
+      });
+    }
+  }
+
+  const flowsByUser = groupRowsByOwner(core.metaFlows);
+  const submissionsByUser = groupRowsByOwner(core.flowSubmissions);
+  for (const userId of collectGroupOwnerIds(flowsByUser, submissionsByUser)) {
+    const flows = flowsByUser.get(userId) || [];
+    const submissions = submissionsByUser.get(userId) || [];
+    const published = countRowsWithStatus(flows, /published/i);
+    addRecord({
+      featureKey: 'whatsapp_flows',
+      userId,
+      status: published > 0 ? 'published' : flows.length > 0 ? 'draft' : 'submissions_only',
+      detail: `${flows.length} flows, ${submissions.length} submissions`,
+      rows: [...flows, ...submissions],
+      metrics: [
+        { label: 'Flows', value: flows.length },
+        { label: 'Published', value: published },
+        { label: 'Submissions', value: submissions.length },
+      ],
+      canUpdateStatus: false,
+    });
+  }
+
+  const automationRulesByUser = groupRowsByOwner(core.automationRules);
+  const conversationalByUser = groupRowsByOwner(core.conversationalAutomationConfigs);
+  for (const userId of collectGroupOwnerIds(automationRulesByUser, conversationalByUser)) {
+    const rules = automationRulesByUser.get(userId) || [];
+    const configs = conversationalByUser.get(userId) || [];
+    const enabledRules = rules.filter((row) => Boolean(row.is_enabled));
+    const welcomeEnabled = configs.some((row) => Boolean(row.enable_welcome_message));
+    addRecord({
+      featureKey: 'automations',
+      userId,
+      status: enabledRules.length > 0 || welcomeEnabled ? 'enabled' : 'configured',
+      detail: `${enabledRules.length}/${rules.length} rules enabled${welcomeEnabled ? ', welcome automation on' : ''}`,
+      rows: [...rules, ...configs],
+      metrics: [
+        { label: 'Rules', value: rules.length },
+        { label: 'Enabled', value: enabledRules.length },
+        { label: 'Commands', value: configs.reduce((total, row) => total + (Array.isArray(row.commands) ? row.commands.length : 0), 0) },
+      ],
+      canUpdateStatus: false,
+    });
+  }
+
+  const developerCredentialsByUser = groupRowsByOwner(core.developerApiCredentials);
+  const developerWebhooksByUser = groupRowsByOwner(core.developerWebhookEndpoints);
+  for (const userId of collectGroupOwnerIds(developerCredentialsByUser, developerWebhooksByUser)) {
+    const credentials = developerCredentialsByUser.get(userId) || [];
+    const webhooks = developerWebhooksByUser.get(userId) || [];
+    const activeCredentials = credentials.filter((row) => String(row.status || '').toLowerCase() === 'active');
+    const activeWebhooks = webhooks.filter((row) => String(row.status || '').toLowerCase() === 'active');
+    addRecord({
+      featureKey: 'developer_tools',
+      userId,
+      status: activeCredentials.length > 0 || activeWebhooks.length > 0 ? 'active' : 'inactive',
+      detail: `${credentials.length} API credentials, ${webhooks.length} webhook endpoints`,
+      rows: [...credentials, ...webhooks],
+      metrics: [
+        { label: 'API keys', value: credentials.length },
+        { label: 'Active keys', value: activeCredentials.length },
+        { label: 'Webhooks', value: webhooks.length },
+      ],
+      canUpdateStatus: false,
+    });
+  }
+
+  const teamMembersByOwner = groupRowsByOwner(core.workspaceTeamMembers, (row) => normalizeString(row.workspace_owner_user_id));
+  for (const [userId, rows] of teamMembersByOwner) {
+    const active = rows.filter((row) => String(row.status || '').toLowerCase() === 'active').length;
+    const invited = rows.filter((row) => String(row.status || '').toLowerCase() === 'invited').length;
+    addRecord({
+      featureKey: 'workspace_team',
+      userId,
+      status: active > 0 ? 'active' : invited > 0 ? 'invited' : 'configured',
+      detail: `${rows.length} team members`,
+      rows,
+      metrics: [
+        { label: 'Members', value: rows.length },
+        { label: 'Active', value: active },
+        { label: 'Invited', value: invited },
+      ],
+      canUpdateStatus: false,
+    });
+  }
+
+  for (const row of core.notificationPreferences) {
+    const userId = rowOwnerUserId(row);
+    if (!userId) continue;
+    const enabledEvents = [
+      row.incoming_message_enabled,
+      row.incoming_email_enabled,
+      row.template_review_enabled,
+      row.missed_call_enabled,
+      row.lead_enabled,
+      row.campaign_sent_enabled,
+      row.email_campaign_enabled,
+      row.display_name_approved_enabled,
+      row.team_joined_enabled,
+    ].filter(Boolean).length;
+    addRecord({
+      featureKey: 'notifications',
+      userId,
+      status: row.enabled === false ? 'disabled' : 'enabled',
+      detail: `${enabledEvents} notification event types enabled`,
+      rows: [row],
+      metrics: [
+        { label: 'Events enabled', value: enabledEvents },
+        { label: 'Sound', value: row.sound_enabled === false ? 'Off' : 'On' },
+        { label: 'Volume', value: normalizeString(row.volume) || '0.8' },
+      ],
+    });
+  }
+
+  const workspaceCount = Math.max(workspaceIds.size, core.profiles.length);
+  const featureSummaries = clientFeatureKeys.map((featureKey) => {
+    const catalog = clientFeatureCatalog[featureKey];
+    const featureRecords = records.filter((record) => record.featureKey === featureKey);
+    const configuredWorkspaceCount = new Set(featureRecords.map((record) => record.userId)).size;
+    const activeCount = featureRecords.filter((record) => isHealthyFeatureStatus(record.status)).length;
+    const criticalCount = featureRecords.filter((record) => record.severity === 'critical').length;
+    const warningCount = featureRecords.filter((record) => record.severity === 'warning').length;
+    const attentionCount = criticalCount + warningCount;
+    const missingCount = Math.max(workspaceCount - configuredWorkspaceCount, 0);
+    const severity: LivePayload['severity'] =
+      criticalCount > 0 ? 'critical' : warningCount > 0 ? 'warning' : configuredWorkspaceCount > 0 ? 'success' : 'warning';
+
+    return {
+      key: featureKey,
+      label: catalog.label,
+      category: catalog.category,
+      description: catalog.description,
+      route: catalog.route,
+      status: configuredWorkspaceCount === 0 ? 'not configured' : attentionCount > 0 ? 'needs review' : 'healthy',
+      severity,
+      metrics: [
+        { label: 'Configured', value: configuredWorkspaceCount },
+        { label: 'Active', value: activeCount },
+        { label: 'Attention', value: attentionCount },
+        { label: 'Missing', value: missingCount },
+      ],
+      risks: featureRecords.flatMap((record) => record.risks).slice(0, 5),
+    };
+  });
+
+  const severityRank: Record<LivePayload['severity'], number> = {
+    critical: 0,
+    warning: 1,
+    info: 2,
+    success: 3,
+  };
+
+  return {
+    generatedAt: nowIso(),
+    summary: {
+      workspaces: workspaceCount,
+      featureFamilies: clientFeatureKeys.length,
+      configuredRecords: records.length,
+      attentionRecords: records.filter((record) => record.severity === 'critical' || record.severity === 'warning').length,
+      controllableRecords: records.filter((record) => record.canUpdateStatus).length,
+    },
+    features: featureSummaries,
+    records: records.sort((left, right) => {
+      const severityDelta = severityRank[left.severity] - severityRank[right.severity];
+      if (severityDelta !== 0) return severityDelta;
+      return Date.parse(String(right.updatedAt || 0)) - Date.parse(String(left.updatedAt || 0));
+    }),
+    recentActivity: buildTimeline(core).slice(0, 80),
+    warnings: core.errors,
+  };
+}
+
+async function updateClientFeatureStatus(
+  admin: AdminContext | undefined,
+  featureKey: ClientFeatureKey,
+  userId: string,
+  status: string,
+  notifyUser: boolean,
+) {
+  const control = clientFeatureStatusControls[featureKey];
+  if (!control) {
+    throw new Error('This client feature does not support direct status changes from the Admin app.');
+  }
+
+  if (!control.statuses.includes(status)) {
+    throw new Error(`Status must be one of: ${control.statuses.join(', ')}.`);
+  }
+
+  if (featureKey === 'notifications') {
+    const { error } = await adminSupabase.from('user_notification_preferences').upsert(
+      {
+        user_id: userId,
+        enabled: status === 'enabled',
+        updated_at: nowIso(),
+      },
+      { onConflict: 'user_id' },
+    );
+
+    if (error) {
+      throw error;
+    }
+  } else {
+    const { data, error } = await adminSupabase
+      .from(control.table)
+      .update({
+        status,
+        updated_at: nowIso(),
+      })
+      .eq(control.userColumn || 'user_id', userId)
+      .select('user_id')
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data) {
+      throw new Error('No matching client feature record was found for this workspace.');
+    }
+  }
+
+  if (notifyUser) {
+    await adminSupabase.from('user_notifications').insert({
+      user_id: userId,
+      type: 'lead_created',
+      title: 'Workspace feature status updated',
+      body: `${clientFeatureCatalog[featureKey].label} was marked ${status} by Connektly support.`,
+      target_path: clientFeatureCatalog[featureKey].route,
+      metadata: { source: 'owner_dashboard', featureKey, status },
+    });
+  }
+
+  await recordAdminAudit(admin, 'UPDATE_CLIENT_FEATURE_STATUS', userId, { featureKey, status, notifyUser });
+}
+
+type WebsiteBlogPost = {
+  id: string;
+  title: string;
+  author: string;
+  excerpt: string;
+  content: string;
+  coverImage: string;
+  date: string;
+  updatedAt?: string | null;
+};
+
+type WebsiteHelpArticle = {
+  id: string;
+  title: string;
+  author: string;
+  category: string;
+  excerpt: string;
+  content: string;
+  date: string;
+  updatedAt?: string | null;
+};
+
+const websiteBlogsFile = path.join(websiteContentRoot, 'data', 'blogs.json');
+const websiteHelpFile = path.join(websiteContentRoot, 'data', 'help.json');
+const websiteUploadsDir = path.join(websiteContentRoot, 'uploads');
+const defaultHelpCategories = ['Connektly Overview', 'Get Started', 'Connect Your Number', 'Privacy & Security'];
+
+async function readWebsiteJsonArray(filePath: string) {
+  try {
+    const data = await fs.readFile(filePath, 'utf8');
+    const parsed = JSON.parse(data);
+    return Array.isArray(parsed) ? parsed.filter(isRecord) : [];
+  } catch (error) {
+    if (isRecord(error) && error.code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function writeWebsiteJsonArray(filePath: string, rows: JsonRecord[]) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(tempPath, `${JSON.stringify(rows, null, 2)}\n`, 'utf8');
+  await fs.rename(tempPath, filePath);
+}
+
+function normalizeWebsiteDate(value: unknown) {
+  const timestamp = Date.parse(String(value || ''));
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : nowIso();
+}
+
+function websiteAssetUrl(value: unknown) {
+  const asset = normalizeString(value);
+  if (!asset) return null;
+  if (/^https?:\/\//i.test(asset)) return asset;
+  return `${websitePublicBaseUrl}${asset.startsWith('/') ? asset : `/${asset}`}`;
+}
+
+function normalizeWebsiteBlog(row: JsonRecord): WebsiteBlogPost {
+  return {
+    id: normalizeString(row.id) || Date.now().toString(),
+    title: normalizeString(row.title) || 'Untitled',
+    author: normalizeString(row.author) || 'Anonymous',
+    excerpt: normalizeString(row.excerpt) || '',
+    content: typeof row.content === 'string' ? row.content : '',
+    coverImage: normalizeString(row.coverImage) || '',
+    date: normalizeWebsiteDate(row.date),
+    updatedAt: normalizeString(row.updatedAt),
+  };
+}
+
+function normalizeWebsiteHelpArticle(row: JsonRecord): WebsiteHelpArticle {
+  return {
+    id: normalizeString(row.id) || `help-${Date.now()}`,
+    title: normalizeString(row.title) || 'Untitled',
+    author: normalizeString(row.author) || 'Support Team',
+    category: normalizeString(row.category) || 'General',
+    excerpt: normalizeString(row.excerpt) || '',
+    content: typeof row.content === 'string' ? row.content : '',
+    date: normalizeWebsiteDate(row.date),
+    updatedAt: normalizeString(row.updatedAt),
+  };
+}
+
+async function loadWebsiteContent() {
+  const [blogRows, helpRows] = await Promise.all([
+    readWebsiteJsonArray(websiteBlogsFile),
+    readWebsiteJsonArray(websiteHelpFile),
+  ]);
+  const blogs = blogRows
+    .map(normalizeWebsiteBlog)
+    .sort((left, right) => Date.parse(right.date) - Date.parse(left.date));
+  const helpArticles = helpRows
+    .map(normalizeWebsiteHelpArticle)
+    .sort((left, right) => Date.parse(right.date) - Date.parse(left.date));
+  const categories = [...new Set([...defaultHelpCategories, ...helpArticles.map((article) => article.category).filter(Boolean)])];
+
+  return {
+    generatedAt: nowIso(),
+    publicBaseUrl: websitePublicBaseUrl,
+    summary: {
+      blogs: blogs.length,
+      helpArticles: helpArticles.length,
+      helpCategories: categories.length,
+      mediaRootConfigured: true,
+    },
+    categories,
+    blogs,
+    helpArticles,
+    warnings: [] as string[],
+  };
+}
+
+function requireWebsiteTitle(value: unknown, label: string) {
+  const title = normalizeString(value);
+  if (!title) {
+    throw new Error(`${label} title is required.`);
+  }
+  return title;
+}
+
+function normalizeBlogPayload(body: JsonRecord, existing?: WebsiteBlogPost): WebsiteBlogPost {
+  const timestamp = nowIso();
+  return {
+    id: existing?.id || Date.now().toString(),
+    title: requireWebsiteTitle(body.title ?? existing?.title, 'Blog post'),
+    author: normalizeString(body.author ?? existing?.author) || 'Anonymous',
+    excerpt: normalizeString(body.excerpt ?? existing?.excerpt) || '',
+    content: typeof body.content === 'string' ? body.content : existing?.content || '',
+    coverImage: normalizeString(body.coverImage ?? existing?.coverImage) || '',
+    date: existing?.date || timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function normalizeHelpPayload(body: JsonRecord, existing?: WebsiteHelpArticle): WebsiteHelpArticle {
+  const timestamp = nowIso();
+  return {
+    id: existing?.id || `help-${Date.now()}`,
+    title: requireWebsiteTitle(body.title ?? existing?.title, 'Help article'),
+    author: normalizeString(body.author ?? existing?.author) || 'Support Team',
+    category: normalizeString(body.category ?? existing?.category) || defaultHelpCategories[0],
+    excerpt: normalizeString(body.excerpt ?? existing?.excerpt) || '',
+    content: typeof body.content === 'string' ? body.content : existing?.content || '',
+    date: existing?.date || timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function sortWebsiteRows<T extends { date: string; updatedAt?: string | null }>(rows: T[]) {
+  return [...rows].sort(
+    (left, right) =>
+      Date.parse(String(right.updatedAt || right.date || 0)) - Date.parse(String(left.updatedAt || left.date || 0)),
+  );
+}
+
+async function saveWebsiteBlog(admin: AdminContext | undefined, body: JsonRecord, id?: string) {
+  const blogs = (await readWebsiteJsonArray(websiteBlogsFile)).map(normalizeWebsiteBlog);
+  const index = id ? blogs.findIndex((blog) => blog.id === id) : -1;
+  if (id && index === -1) {
+    throw new Error('Blog post was not found.');
+  }
+
+  const nextBlog = normalizeBlogPayload(body, index >= 0 ? blogs[index] : undefined);
+  const nextBlogs = index >= 0 ? blogs.map((blog, blogIndex) => (blogIndex === index ? nextBlog : blog)) : [nextBlog, ...blogs];
+  await writeWebsiteJsonArray(websiteBlogsFile, sortWebsiteRows(nextBlogs) as unknown as JsonRecord[]);
+  await recordAdminAudit(admin, index >= 0 ? 'UPDATE_WEBSITE_BLOG' : 'CREATE_WEBSITE_BLOG', null, {
+    id: nextBlog.id,
+    title: nextBlog.title,
+  });
+  return loadWebsiteContent();
+}
+
+async function deleteWebsiteBlog(admin: AdminContext | undefined, id: string) {
+  const blogs = (await readWebsiteJsonArray(websiteBlogsFile)).map(normalizeWebsiteBlog);
+  const existing = blogs.find((blog) => blog.id === id);
+  if (!existing) {
+    throw new Error('Blog post was not found.');
+  }
+
+  await writeWebsiteJsonArray(websiteBlogsFile, blogs.filter((blog) => blog.id !== id) as unknown as JsonRecord[]);
+  await recordAdminAudit(admin, 'DELETE_WEBSITE_BLOG', null, { id, title: existing.title });
+  return loadWebsiteContent();
+}
+
+async function saveWebsiteHelpArticle(admin: AdminContext | undefined, body: JsonRecord, id?: string) {
+  const articles = (await readWebsiteJsonArray(websiteHelpFile)).map(normalizeWebsiteHelpArticle);
+  const index = id ? articles.findIndex((article) => article.id === id) : -1;
+  if (id && index === -1) {
+    throw new Error('Help article was not found.');
+  }
+
+  const nextArticle = normalizeHelpPayload(body, index >= 0 ? articles[index] : undefined);
+  const nextArticles = index >= 0
+    ? articles.map((article, articleIndex) => (articleIndex === index ? nextArticle : article))
+    : [nextArticle, ...articles];
+  await writeWebsiteJsonArray(websiteHelpFile, sortWebsiteRows(nextArticles) as unknown as JsonRecord[]);
+  await recordAdminAudit(admin, index >= 0 ? 'UPDATE_WEBSITE_HELP_ARTICLE' : 'CREATE_WEBSITE_HELP_ARTICLE', null, {
+    id: nextArticle.id,
+    title: nextArticle.title,
+    category: nextArticle.category,
+  });
+  return loadWebsiteContent();
+}
+
+async function deleteWebsiteHelpArticle(admin: AdminContext | undefined, id: string) {
+  const articles = (await readWebsiteJsonArray(websiteHelpFile)).map(normalizeWebsiteHelpArticle);
+  const existing = articles.find((article) => article.id === id);
+  if (!existing) {
+    throw new Error('Help article was not found.');
+  }
+
+  await writeWebsiteJsonArray(websiteHelpFile, articles.filter((article) => article.id !== id) as unknown as JsonRecord[]);
+  await recordAdminAudit(admin, 'DELETE_WEBSITE_HELP_ARTICLE', null, { id, title: existing.title });
+  return loadWebsiteContent();
+}
+
+function extensionForMime(mimeType: string) {
+  if (mimeType === 'image/jpeg') return 'jpg';
+  if (mimeType === 'image/png') return 'png';
+  if (mimeType === 'image/webp') return 'webp';
+  if (mimeType === 'image/gif') return 'gif';
+  return null;
+}
+
+function sanitizeUploadBaseName(fileName: unknown) {
+  const normalized = normalizeString(fileName) || 'website-media';
+  const base = path.parse(normalized).name || 'website-media';
+  return base.replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 72) || 'website-media';
+}
+
+async function saveWebsiteMedia(admin: AdminContext | undefined, body: JsonRecord) {
+  const dataUrl = normalizeString(body.dataUrl);
+  if (!dataUrl) {
+    throw new Error('Image data is required.');
+  }
+
+  const match = dataUrl.match(/^data:(image\/(?:jpeg|png|webp|gif));base64,([a-z0-9+/=]+)$/i);
+  if (!match) {
+    throw new Error('Only base64 PNG, JPEG, WEBP, or GIF images can be uploaded.');
+  }
+
+  const mimeType = match[1].toLowerCase();
+  const extension = extensionForMime(mimeType);
+  if (!extension) {
+    throw new Error('Unsupported image type.');
+  }
+
+  const buffer = Buffer.from(match[2], 'base64');
+  if (buffer.byteLength === 0 || buffer.byteLength > 5 * 1024 * 1024) {
+    throw new Error('Image must be smaller than 5 MB.');
+  }
+
+  await fs.mkdir(websiteUploadsDir, { recursive: true });
+  const fileName = `${Date.now()}-${crypto.randomInt(100000000, 999999999)}-${sanitizeUploadBaseName(body.fileName)}.${extension}`;
+  const uploadPath = path.join(websiteUploadsDir, fileName);
+  await fs.writeFile(uploadPath, buffer);
+  const location = `/uploads/${fileName}`;
+  await recordAdminAudit(admin, 'UPLOAD_WEBSITE_MEDIA', null, {
+    fileName,
+    mimeType,
+    size: buffer.byteLength,
+  });
+
+  return {
+    location,
+    publicUrl: websiteAssetUrl(location),
+    contentType: mimeType,
+    size: buffer.byteLength,
+  };
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'connektly-owner-dashboard', uptimeSeconds: Math.round(process.uptime()) });
+});
+
+app.get('/api/public/pricing-plans', async (_req, res) => {
+  try {
+    const settings = await loadPlatformSettings();
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    res.json({
+      plans: buildPublicPricingPlans(settings.rawSettings),
+      generatedAt: nowIso(),
+      warning: settings.warning,
+    });
+  } catch (error) {
+    sendError(res, 500, error);
+  }
 });
 
 app.get('/api/admin/me', requireAdmin, (req: AdminRequest, res) => {
@@ -3317,6 +4429,34 @@ app.get('/api/admin/platform-settings', requireAdmin, requireAdminPermission('pl
   }
 });
 
+app.get('/api/admin/plans', requireAdmin, requireAdminPermission('plan_management'), async (_req, res) => {
+  try {
+    const settings = await loadPlatformSettings();
+    res.json({
+      plans: settings.settings.pricing_plans.plans,
+      warning: settings.warning,
+      generatedAt: nowIso(),
+    });
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.put('/api/admin/plans', requireAdmin, requireAdminPermission('plan_management'), async (req: AdminRequest, res) => {
+  try {
+    const saved = await savePlatformSettingsSection(req.admin, 'pricing_plans', {
+      plans: Array.isArray(req.body.plans) ? req.body.plans : [],
+    });
+    res.json({
+      plans: saved.settings.pricing_plans.plans,
+      warning: saved.warning,
+      generatedAt: nowIso(),
+    });
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
 app.patch('/api/admin/platform-settings/:section', requireAdmin, requireAdminPermission('platform_settings'), async (req: AdminRequest, res) => {
   try {
     const section = normalizePlatformSection(req.params.section);
@@ -3378,6 +4518,120 @@ app.get('/api/admin/integrations', requireAdmin, requireAdminPermission('global_
       loadCoreData(),
     ]);
     res.json(buildGlobalIntegrations(core, clientHealth));
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.get('/api/admin/client-features', requireAdmin, requireAdminPermission('global_integrations'), async (_req, res) => {
+  try {
+    const [authUsers, core] = await Promise.all([
+      listAuthUsers().catch(() => []),
+      loadCoreData(),
+    ]);
+    res.json(buildClientFeatureOperations(core, authUsers));
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.patch('/api/admin/client-features/:featureKey/:userId/status', requireAdmin, requireAdminPermission('global_integrations'), async (req: AdminRequest, res) => {
+  try {
+    const featureKey = normalizeClientFeatureKey(req.params.featureKey);
+    const userId = normalizeString(req.params.userId);
+    const status = normalizeString(req.body.status);
+
+    if (!featureKey || !userId || !status) {
+      throw new Error('Feature, workspace, and status are required.');
+    }
+
+    await updateClientFeatureStatus(req.admin, featureKey, userId, status, Boolean(req.body.notifyUser));
+    const [authUsers, core] = await Promise.all([
+      listAuthUsers().catch(() => []),
+      loadCoreData(),
+    ]);
+
+    res.json(buildClientFeatureOperations(core, authUsers));
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.get('/api/admin/website-content', requireAdmin, requireAdminPermission('website_management'), async (_req, res) => {
+  try {
+    res.json(await loadWebsiteContent());
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.post('/api/admin/website-content/media', requireAdmin, requireAdminPermission('website_management'), async (req: AdminRequest, res) => {
+  try {
+    res.status(201).json(await saveWebsiteMedia(req.admin, req.body));
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.post('/api/admin/website-content/blogs', requireAdmin, requireAdminPermission('website_management'), async (req: AdminRequest, res) => {
+  try {
+    res.status(201).json(await saveWebsiteBlog(req.admin, req.body));
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.patch('/api/admin/website-content/blogs/:id', requireAdmin, requireAdminPermission('website_management'), async (req: AdminRequest, res) => {
+  try {
+    const id = normalizeString(req.params.id);
+    if (!id) {
+      throw new Error('Blog post id is required.');
+    }
+    res.json(await saveWebsiteBlog(req.admin, req.body, id));
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.delete('/api/admin/website-content/blogs/:id', requireAdmin, requireAdminPermission('website_management'), async (req: AdminRequest, res) => {
+  try {
+    const id = normalizeString(req.params.id);
+    if (!id) {
+      throw new Error('Blog post id is required.');
+    }
+    res.json(await deleteWebsiteBlog(req.admin, id));
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.post('/api/admin/website-content/help', requireAdmin, requireAdminPermission('website_management'), async (req: AdminRequest, res) => {
+  try {
+    res.status(201).json(await saveWebsiteHelpArticle(req.admin, req.body));
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.patch('/api/admin/website-content/help/:id', requireAdmin, requireAdminPermission('website_management'), async (req: AdminRequest, res) => {
+  try {
+    const id = normalizeString(req.params.id);
+    if (!id) {
+      throw new Error('Help article id is required.');
+    }
+    res.json(await saveWebsiteHelpArticle(req.admin, req.body, id));
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.delete('/api/admin/website-content/help/:id', requireAdmin, requireAdminPermission('website_management'), async (req: AdminRequest, res) => {
+  try {
+    const id = normalizeString(req.params.id);
+    if (!id) {
+      throw new Error('Help article id is required.');
+    }
+    res.json(await deleteWebsiteHelpArticle(req.admin, id));
   } catch (error) {
     sendError(res, 500, error);
   }

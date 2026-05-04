@@ -13,9 +13,12 @@ import TurnstileWidget from './components/TurnstileWidget';
 import CommandCenter from './pages/CommandCenter';
 import OrganizationsPage from './pages/OrganizationsPage';
 import UsersPage from './pages/UsersPage';
+import PlanManagementPage from './pages/PlanManagementPage';
 import PlatformSettingsPage from './pages/PlatformSettingsPage';
 import LogsMonitoringPage from './pages/LogsMonitoringPage';
 import GlobalIntegrationsPage from './pages/GlobalIntegrationsPage';
+import ClientFeatureOperationsPage from './pages/ClientFeatureOperationsPage';
+import WebsiteManagementPage from './pages/WebsiteManagementPage';
 import PaymentsPage from './pages/PaymentsPage';
 import OwnerSettingsPage from './pages/OwnerSettingsPage';
 
@@ -327,9 +330,12 @@ export default function App() {
           <Route index element={<CommandCenter />} />
           <Route path="organizations" element={<OrganizationsPage />} />
           <Route path="users" element={<UsersPage />} />
+          <Route path="plans" element={<PlanManagementPage />} />
           <Route path="platform-settings" element={<PlatformSettingsPage />} />
           <Route path="logs-monitoring" element={<LogsMonitoringPage />} />
           <Route path="global-integrations" element={<GlobalIntegrationsPage />} />
+          <Route path="client-features" element={<ClientFeatureOperationsPage />} />
+          <Route path="website" element={<WebsiteManagementPage />} />
           <Route path="payments" element={<PaymentsPage />} />
           <Route path="webhooks" element={<Navigate to="/dashboard/logs-monitoring" replace />} />
           <Route path="server" element={<Navigate to="/dashboard/logs-monitoring" replace />} />

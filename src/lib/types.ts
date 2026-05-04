@@ -14,6 +14,119 @@ export type AdminLiveEvent = {
   payload?: unknown;
 };
 
+export type ClientFeatureKey =
+  | 'whatsapp'
+  | 'instagram'
+  | 'messenger'
+  | 'meta_ads'
+  | 'meta_lead_capture'
+  | 'whatsapp_payments'
+  | 'woocommerce'
+  | 'email'
+  | 'email_templates'
+  | 'whatsapp_flows'
+  | 'automations'
+  | 'developer_tools'
+  | 'workspace_team'
+  | 'notifications';
+
+export type ClientFeatureMetric = {
+  label: string;
+  value: string | number;
+};
+
+export type ClientFeatureSummary = {
+  key: ClientFeatureKey;
+  label: string;
+  category: string;
+  description: string;
+  route: string;
+  status: string;
+  severity: Severity;
+  metrics: ClientFeatureMetric[];
+  risks: string[];
+};
+
+export type ClientFeatureRecord = {
+  id: string;
+  featureKey: ClientFeatureKey;
+  featureLabel: string;
+  category: string;
+  userId: string;
+  organizationName: string;
+  ownerName: string;
+  ownerEmail: string | null;
+  status: string;
+  severity: Severity;
+  detail: string;
+  route: string;
+  updatedAt: string | null;
+  metrics: ClientFeatureMetric[];
+  risks: string[];
+  canUpdateStatus: boolean;
+  allowedStatuses: string[];
+  raw: unknown;
+};
+
+export type ClientFeatureOperationsResponse = {
+  generatedAt: string;
+  summary: {
+    workspaces: number;
+    featureFamilies: number;
+    configuredRecords: number;
+    attentionRecords: number;
+    controllableRecords: number;
+  };
+  features: ClientFeatureSummary[];
+  records: ClientFeatureRecord[];
+  recentActivity: AdminLiveEvent[];
+  warnings: string[];
+};
+
+export type WebsiteBlogPost = {
+  id: string;
+  title: string;
+  author: string;
+  excerpt: string;
+  content: string;
+  coverImage: string;
+  date: string;
+  updatedAt?: string | null;
+};
+
+export type WebsiteHelpArticle = {
+  id: string;
+  title: string;
+  author: string;
+  category: string;
+  excerpt: string;
+  content: string;
+  date: string;
+  updatedAt?: string | null;
+};
+
+export type WebsiteContentResponse = {
+  generatedAt: string;
+  publicBaseUrl: string;
+  summary: {
+    blogs: number;
+    helpArticles: number;
+    helpCategories: number;
+    mediaRootConfigured: boolean;
+  };
+  categories: string[];
+  blogs: WebsiteBlogPost[];
+  helpArticles: WebsiteHelpArticle[];
+  warnings: string[];
+};
+
+export type WebsiteMediaUploadResponse = {
+  location: string;
+  publicUrl: string | null;
+  contentType: string;
+  size: number;
+};
+
 export type SystemHealth = {
   generatedAt: string;
   status: 'ok' | 'warning' | 'critical';
@@ -353,6 +466,12 @@ export type UserPlatformSettingsResponse = {
   generatedAt: string;
 };
 
+export type PlanManagementResponse = {
+  plans: PlatformPricingPlan[];
+  warning: string | null;
+  generatedAt: string;
+};
+
 export type OwnerNotificationPreferences = {
   liveEventSound: boolean;
   criticalWebhookAlerts: boolean;
@@ -367,10 +486,12 @@ export type AdminPermissionKey =
   | 'command_center'
   | 'organizations'
   | 'global_users'
+  | 'plan_management'
   | 'platform_settings'
   | 'payments'
   | 'logs_monitoring'
   | 'global_integrations'
+  | 'website_management'
   | 'webhooks'
   | 'server_status'
   | 'security_audit';

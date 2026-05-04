@@ -3,6 +3,8 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   Activity,
   Bell,
+  BookOpenText,
+  Boxes,
   Building2,
   CreditCard,
   Gauge,
@@ -34,10 +36,18 @@ const navSections = [
       { label: 'Overview', path: '/dashboard', icon: LayoutDashboard, permissions: ['command_center'] },
       { label: 'Organization Management', path: '/dashboard/organizations', icon: Building2, permissions: ['organizations'] },
       { label: 'Global Users', path: '/dashboard/users', icon: Users, permissions: ['global_users'] },
+      { label: 'Plan Management', path: '/dashboard/plans', icon: CreditCard, permissions: ['plan_management'] },
       { label: 'Payments', path: '/dashboard/payments', icon: CreditCard, permissions: ['payments'] },
       { label: 'User Platform Settings', path: '/dashboard/platform-settings', icon: SlidersHorizontal, permissions: ['platform_settings'] },
       { label: 'Global Integrations', path: '/dashboard/global-integrations', icon: Globe2, permissions: ['global_integrations'] },
+      { label: 'Client Feature Operations', path: '/dashboard/client-features', icon: Boxes, permissions: ['global_integrations'] },
       { label: 'Admin Profile', path: '/dashboard/settings', icon: Settings },
+    ],
+  },
+  {
+    title: 'Website Management',
+    items: [
+      { label: 'Blogs & Help Center', path: '/dashboard/website', icon: BookOpenText, permissions: ['website_management'] },
     ],
   },
   {
