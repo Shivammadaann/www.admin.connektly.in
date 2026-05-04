@@ -20,6 +20,7 @@ import type {
   UserPlatformSettingsResponse,
   WebsiteBlogPost,
   WebsiteContentResponse,
+  WebsiteLeadFormsResponse,
   WebsiteHelpArticle,
   WebsiteMediaUploadResponse,
   WebhooksResponse,
@@ -112,6 +113,9 @@ export const adminApi = {
   },
   getWebsiteContent() {
     return request<WebsiteContentResponse>('/website-content', { cache: 'no-store' });
+  },
+  getWebsiteLeads() {
+    return request<WebsiteLeadFormsResponse>('/website-leads', { cache: 'no-store' });
   },
   uploadWebsiteMedia(payload: { fileName: string; dataUrl: string }) {
     return request<WebsiteMediaUploadResponse>('/website-content/media', {

@@ -3768,8 +3768,31 @@ type WebsiteHelpArticle = {
   updatedAt?: string | null;
 };
 
+type WebsiteLeadSubmissionType = 'booked_demo' | 'lead_inquiry';
+
+type WebsiteLeadSubmission = {
+  id: string;
+  type: WebsiteLeadSubmissionType;
+  submittedAt: string;
+  sourcePath: string;
+  sourceUrl: string;
+  pageTitle: string;
+  formId: string;
+  userAgent: string;
+  name: string;
+  email: string;
+  phone: string;
+  company: string;
+  topic: string;
+  message: string;
+  fields: Record<string, string | string[]>;
+};
+
 const websiteBlogsFile = path.join(websiteContentRoot, 'data', 'blogs.json');
 const websiteHelpFile = path.join(websiteContentRoot, 'data', 'help.json');
+const websiteLeadFormsFile = path.resolve(
+  process.env.WEBSITE_LEAD_FORMS_FILE || path.join(websiteContentRoot, 'data', 'lead-form-submissions.json'),
+);
 const websiteUploadsDir = path.join(websiteContentRoot, 'uploads');
 const defaultHelpCategories = ['Connektly Overview', 'Get Started', 'Connect Your Number', 'Privacy & Security'];
 
@@ -3831,6 +3854,50 @@ function normalizeWebsiteHelpArticle(row: JsonRecord): WebsiteHelpArticle {
   };
 }
 
+function normalizeWebsiteLeadType(value: unknown): WebsiteLeadSubmissionType {
+  return normalizeString(value) === 'booked_demo' ? 'booked_demo' : 'lead_inquiry';
+}
+
+function normalizeWebsiteLeadFieldValue(value: unknown): string | string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+  }
+  return String(value ?? '').trim();
+}
+
+function normalizeWebsiteLeadFields(value: unknown): Record<string, string | string[]> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  return Object.entries(value).reduce<Record<string, string | string[]>>((fields, [key, fieldValue]) => {
+    const fieldName = normalizeString(key);
+    if (!fieldName) return fields;
+    fields[fieldName] = normalizeWebsiteLeadFieldValue(fieldValue);
+    return fields;
+  }, {});
+}
+
+function normalizeWebsiteLeadSubmission(row: JsonRecord): WebsiteLeadSubmission {
+  return {
+    id: normalizeString(row.id) || `lead-${Date.now()}`,
+    type: normalizeWebsiteLeadType(row.type),
+    submittedAt: normalizeWebsiteDate(row.submittedAt),
+    sourcePath: normalizeString(row.sourcePath) || '/',
+    sourceUrl: normalizeString(row.sourceUrl) || '',
+    pageTitle: normalizeString(row.pageTitle) || '',
+    formId: normalizeString(row.formId) || '',
+    userAgent: normalizeString(row.userAgent) || '',
+    name: normalizeString(row.name) || '',
+    email: normalizeString(row.email) || '',
+    phone: normalizeString(row.phone) || '',
+    company: normalizeString(row.company) || '',
+    topic: normalizeString(row.topic) || '',
+    message: normalizeString(row.message) || '',
+    fields: normalizeWebsiteLeadFields(row.fields),
+  };
+}
+
 async function loadWebsiteContent() {
   const [blogRows, helpRows] = await Promise.all([
     readWebsiteJsonArray(websiteBlogsFile),
@@ -3856,6 +3923,30 @@ async function loadWebsiteContent() {
     categories,
     blogs,
     helpArticles,
+    warnings: [] as string[],
+  };
+}
+
+async function loadWebsiteLeadForms() {
+  const rows = await readWebsiteJsonArray(websiteLeadFormsFile);
+  const submissions = rows
+    .map(normalizeWebsiteLeadSubmission)
+    .sort((left, right) => Date.parse(right.submittedAt) - Date.parse(left.submittedAt));
+  const bookedDemos = submissions.filter((submission) => submission.type === 'booked_demo');
+  const leadInquiries = submissions.filter((submission) => submission.type === 'lead_inquiry');
+
+  return {
+    generatedAt: nowIso(),
+    publicBaseUrl: websitePublicBaseUrl,
+    summary: {
+      total: submissions.length,
+      bookedDemos: bookedDemos.length,
+      leadInquiries: leadInquiries.length,
+      lastSubmissionAt: submissions[0]?.submittedAt || null,
+    },
+    bookedDemos,
+    leadInquiries,
+    submissions,
     warnings: [] as string[],
   };
 }
@@ -4560,6 +4651,14 @@ app.patch('/api/admin/client-features/:featureKey/:userId/status', requireAdmin,
 app.get('/api/admin/website-content', requireAdmin, requireAdminPermission('website_management'), async (_req, res) => {
   try {
     res.json(await loadWebsiteContent());
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.get('/api/admin/website-leads', requireAdmin, requireAdminPermission('website_management'), async (_req, res) => {
+  try {
+    res.json(await loadWebsiteLeadForms());
   } catch (error) {
     sendError(res, 500, error);
   }

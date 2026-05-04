@@ -9,6 +9,7 @@ import {
   CreditCard,
   Gauge,
   Globe2,
+  Inbox,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -48,6 +49,7 @@ const navSections = [
     title: 'Website Management',
     items: [
       { label: 'Blogs & Help Center', path: '/dashboard/website', icon: BookOpenText, permissions: ['website_management'] },
+      { label: 'Lead Form Data', path: '/dashboard/website-leads', icon: Inbox, permissions: ['website_management'] },
     ],
   },
   {

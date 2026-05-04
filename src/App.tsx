@@ -19,6 +19,7 @@ import LogsMonitoringPage from './pages/LogsMonitoringPage';
 import GlobalIntegrationsPage from './pages/GlobalIntegrationsPage';
 import ClientFeatureOperationsPage from './pages/ClientFeatureOperationsPage';
 import WebsiteManagementPage from './pages/WebsiteManagementPage';
+import WebsiteLeadFormDataPage from './pages/WebsiteLeadFormDataPage';
 import PaymentsPage from './pages/PaymentsPage';
 import OwnerSettingsPage from './pages/OwnerSettingsPage';
 
@@ -336,6 +337,7 @@ export default function App() {
           <Route path="global-integrations" element={<GlobalIntegrationsPage />} />
           <Route path="client-features" element={<ClientFeatureOperationsPage />} />
           <Route path="website" element={<WebsiteManagementPage />} />
+          <Route path="website-leads" element={<WebsiteLeadFormDataPage />} />
           <Route path="payments" element={<PaymentsPage />} />
           <Route path="webhooks" element={<Navigate to="/dashboard/logs-monitoring" replace />} />
           <Route path="server" element={<Navigate to="/dashboard/logs-monitoring" replace />} />
