@@ -84,10 +84,10 @@ const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL ||
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const clientApiBaseUrl = process.env.CLIENT_API_BASE_URL || '';
-const websiteContentRoot = path.resolve(process.env.WEBSITE_CONTENT_ROOT || path.join(__dirname, '..', 'www.connektly.in'));
-const websitePublicBaseUrl = (process.env.WEBSITE_PUBLIC_BASE_URL || process.env.WEBSITE_API_BASE_URL || 'http://localhost:3001')
-  .replace(/\/api\/?$/, '')
-  .replace(/\/$/, '');
+const websitePublicBaseUrl = normalizeWebsitePublicBaseUrl(process.env.WEBSITE_PUBLIC_BASE_URL || process.env.WEBSITE_API_BASE_URL);
+const websiteApiBaseUrl = normalizeWebsiteApiBaseUrl(process.env.WEBSITE_API_BASE_URL || `${websitePublicBaseUrl}/api`);
+const websiteContentSyncToken = process.env.WEBSITE_CONTENT_SYNC_TOKEN || '';
+const websiteContentRoot = process.env.WEBSITE_CONTENT_ROOT ? path.resolve(process.env.WEBSITE_CONTENT_ROOT) : '';
 const allowedEmails = new Set(
   (process.env.ADMIN_ALLOWED_EMAILS || '')
     .split(',')
@@ -141,6 +141,21 @@ app.use((req, res, next) => {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function normalizeWebsitePublicBaseUrl(value: string | undefined) {
+  const configured = (value || 'https://connektly.in').trim();
+  const withoutApiSuffix = configured.replace(/\/api\/?$/, '').replace(/\/$/, '');
+  if (/^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/i.test(withoutApiSuffix)) {
+    return 'https://connektly.in';
+  }
+  return withoutApiSuffix || 'https://connektly.in';
+}
+
+function normalizeWebsiteApiBaseUrl(value: string | undefined) {
+  const configured = (value || 'https://connektly.in/api').trim().replace(/\/$/, '');
+  if (!configured) return 'https://connektly.in/api';
+  return configured.endsWith('/api') ? configured : `${configured}/api`;
 }
 
 function normalizeString(value: unknown) {
@@ -3788,13 +3803,88 @@ type WebsiteLeadSubmission = {
   fields: Record<string, string | string[]>;
 };
 
+type WebsiteContentResponse = {
+  generatedAt: string;
+  publicBaseUrl: string;
+  summary: {
+    blogs: number;
+    helpArticles: number;
+    helpCategories: number;
+    mediaRootConfigured: boolean;
+  };
+  categories: string[];
+  blogs: WebsiteBlogPost[];
+  helpArticles: WebsiteHelpArticle[];
+  warnings: string[];
+};
+
+type WebsiteLeadFormsResponse = {
+  generatedAt: string;
+  publicBaseUrl: string;
+  summary: {
+    total: number;
+    bookedDemos: number;
+    leadInquiries: number;
+    lastSubmissionAt: string | null;
+  };
+  bookedDemos: WebsiteLeadSubmission[];
+  leadInquiries: WebsiteLeadSubmission[];
+  submissions: WebsiteLeadSubmission[];
+  warnings: string[];
+};
+
+type WebsiteMediaUploadResponse = {
+  location: string;
+  publicUrl: string | null;
+  contentType: string;
+  size: number;
+};
+
 const websiteBlogsFile = path.join(websiteContentRoot, 'data', 'blogs.json');
 const websiteHelpFile = path.join(websiteContentRoot, 'data', 'help.json');
-const websiteLeadFormsFile = path.resolve(
-  process.env.WEBSITE_LEAD_FORMS_FILE || path.join(websiteContentRoot, 'data', 'lead-form-submissions.json'),
-);
+const websiteLeadFormsFile = websiteContentRoot ? path.join(websiteContentRoot, 'data', 'lead-form-submissions.json') : '';
 const websiteUploadsDir = path.join(websiteContentRoot, 'uploads');
 const defaultHelpCategories = ['Connektly Overview', 'Get Started', 'Connect Your Number', 'Privacy & Security'];
+
+function canUseLocalWebsiteFiles() {
+  return Boolean(websiteContentRoot);
+}
+
+function missingWebsiteSyncMessage() {
+  return 'Configure WEBSITE_API_BASE_URL and WEBSITE_CONTENT_SYNC_TOKEN so Admin can manage the separately deployed public website.';
+}
+
+async function callWebsiteAdminApi<T>(endpoint: string, init: RequestInit = {}): Promise<T> {
+  if (!websiteContentSyncToken) {
+    throw new Error(missingWebsiteSyncMessage());
+  }
+
+  const headers = new Headers(init.headers);
+  headers.set('Content-Type', 'application/json');
+  headers.set('Authorization', `Bearer ${websiteContentSyncToken}`);
+  headers.set('X-Connektly-Admin-Token', websiteContentSyncToken);
+
+  const response = await fetch(`${websiteApiBaseUrl}/admin${endpoint}`, {
+    ...init,
+    headers,
+  });
+
+  if (!response.ok) {
+    const fallback = `Website API failed with status ${response.status}`;
+    let message = fallback;
+    try {
+      const payload = await response.json();
+      if (isRecord(payload)) {
+        message = normalizeString(payload.error) || fallback;
+      }
+    } catch {
+      message = fallback;
+    }
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<T>;
+}
 
 async function readWebsiteJsonArray(filePath: string) {
   try {
@@ -3898,7 +3988,7 @@ function normalizeWebsiteLeadSubmission(row: JsonRecord): WebsiteLeadSubmission 
   };
 }
 
-async function loadWebsiteContent() {
+async function loadWebsiteContentFromLocal(): Promise<WebsiteContentResponse> {
   const [blogRows, helpRows] = await Promise.all([
     readWebsiteJsonArray(websiteBlogsFile),
     readWebsiteJsonArray(websiteHelpFile),
@@ -3927,7 +4017,18 @@ async function loadWebsiteContent() {
   };
 }
 
-async function loadWebsiteLeadForms() {
+async function loadWebsiteContent(): Promise<WebsiteContentResponse> {
+  try {
+    return await callWebsiteAdminApi<WebsiteContentResponse>('/content', { cache: 'no-store' });
+  } catch (error) {
+    if (!canUseLocalWebsiteFiles()) {
+      throw error;
+    }
+    return loadWebsiteContentFromLocal();
+  }
+}
+
+async function loadWebsiteLeadFormsFromLocal(): Promise<WebsiteLeadFormsResponse> {
   const rows = await readWebsiteJsonArray(websiteLeadFormsFile);
   const submissions = rows
     .map(normalizeWebsiteLeadSubmission)
@@ -3949,6 +4050,17 @@ async function loadWebsiteLeadForms() {
     submissions,
     warnings: [] as string[],
   };
+}
+
+async function loadWebsiteLeadForms(): Promise<WebsiteLeadFormsResponse> {
+  try {
+    return await callWebsiteAdminApi<WebsiteLeadFormsResponse>('/lead-form-submissions', { cache: 'no-store' });
+  } catch (error) {
+    if (!canUseLocalWebsiteFiles()) {
+      throw error;
+    }
+    return loadWebsiteLeadFormsFromLocal();
+  }
 }
 
 function requireWebsiteTitle(value: unknown, label: string) {
@@ -3995,6 +4107,26 @@ function sortWebsiteRows<T extends { date: string; updatedAt?: string | null }>(
 }
 
 async function saveWebsiteBlog(admin: AdminContext | undefined, body: JsonRecord, id?: string) {
+  try {
+    const response = await callWebsiteAdminApi<WebsiteContentResponse>(
+      id ? `/content/blogs/${encodeURIComponent(id)}` : '/content/blogs',
+      {
+        method: id ? 'PATCH' : 'POST',
+        body: JSON.stringify(body),
+      },
+    );
+    await recordAdminAudit(admin, id ? 'UPDATE_WEBSITE_BLOG' : 'CREATE_WEBSITE_BLOG', null, {
+      id,
+      title: normalizeString(body.title),
+      via: 'website_api',
+    });
+    return response;
+  } catch (error) {
+    if (!canUseLocalWebsiteFiles()) {
+      throw error;
+    }
+  }
+
   const blogs = (await readWebsiteJsonArray(websiteBlogsFile)).map(normalizeWebsiteBlog);
   const index = id ? blogs.findIndex((blog) => blog.id === id) : -1;
   if (id && index === -1) {
@@ -4012,6 +4144,18 @@ async function saveWebsiteBlog(admin: AdminContext | undefined, body: JsonRecord
 }
 
 async function deleteWebsiteBlog(admin: AdminContext | undefined, id: string) {
+  try {
+    const response = await callWebsiteAdminApi<WebsiteContentResponse>(`/content/blogs/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+    await recordAdminAudit(admin, 'DELETE_WEBSITE_BLOG', null, { id, via: 'website_api' });
+    return response;
+  } catch (error) {
+    if (!canUseLocalWebsiteFiles()) {
+      throw error;
+    }
+  }
+
   const blogs = (await readWebsiteJsonArray(websiteBlogsFile)).map(normalizeWebsiteBlog);
   const existing = blogs.find((blog) => blog.id === id);
   if (!existing) {
@@ -4024,6 +4168,27 @@ async function deleteWebsiteBlog(admin: AdminContext | undefined, id: string) {
 }
 
 async function saveWebsiteHelpArticle(admin: AdminContext | undefined, body: JsonRecord, id?: string) {
+  try {
+    const response = await callWebsiteAdminApi<WebsiteContentResponse>(
+      id ? `/content/help/${encodeURIComponent(id)}` : '/content/help',
+      {
+        method: id ? 'PATCH' : 'POST',
+        body: JSON.stringify(body),
+      },
+    );
+    await recordAdminAudit(admin, id ? 'UPDATE_WEBSITE_HELP_ARTICLE' : 'CREATE_WEBSITE_HELP_ARTICLE', null, {
+      id,
+      title: normalizeString(body.title),
+      category: normalizeString(body.category),
+      via: 'website_api',
+    });
+    return response;
+  } catch (error) {
+    if (!canUseLocalWebsiteFiles()) {
+      throw error;
+    }
+  }
+
   const articles = (await readWebsiteJsonArray(websiteHelpFile)).map(normalizeWebsiteHelpArticle);
   const index = id ? articles.findIndex((article) => article.id === id) : -1;
   if (id && index === -1) {
@@ -4044,6 +4209,18 @@ async function saveWebsiteHelpArticle(admin: AdminContext | undefined, body: Jso
 }
 
 async function deleteWebsiteHelpArticle(admin: AdminContext | undefined, id: string) {
+  try {
+    const response = await callWebsiteAdminApi<WebsiteContentResponse>(`/content/help/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+    await recordAdminAudit(admin, 'DELETE_WEBSITE_HELP_ARTICLE', null, { id, via: 'website_api' });
+    return response;
+  } catch (error) {
+    if (!canUseLocalWebsiteFiles()) {
+      throw error;
+    }
+  }
+
   const articles = (await readWebsiteJsonArray(websiteHelpFile)).map(normalizeWebsiteHelpArticle);
   const existing = articles.find((article) => article.id === id);
   if (!existing) {
@@ -4070,6 +4247,23 @@ function sanitizeUploadBaseName(fileName: unknown) {
 }
 
 async function saveWebsiteMedia(admin: AdminContext | undefined, body: JsonRecord) {
+  try {
+    const response = await callWebsiteAdminApi<WebsiteMediaUploadResponse>('/content/media', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    await recordAdminAudit(admin, 'UPLOAD_WEBSITE_MEDIA', null, {
+      fileName: normalizeString(body.fileName),
+      location: response.location,
+      via: 'website_api',
+    });
+    return response;
+  } catch (error) {
+    if (!canUseLocalWebsiteFiles()) {
+      throw error;
+    }
+  }
+
   const dataUrl = normalizeString(body.dataUrl);
   if (!dataUrl) {
     throw new Error('Image data is required.');

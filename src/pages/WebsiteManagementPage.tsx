@@ -444,7 +444,7 @@ export default function WebsiteManagementPage() {
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <a
-              href={resolveWebsiteUrl(activeTab === 'blogs' ? '/blogs' : '/help', publicBaseUrl)}
+              href={resolveWebsiteUrl(activeTab === 'blogs' ? '/blogs/' : '/help/', publicBaseUrl)}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center justify-center rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
