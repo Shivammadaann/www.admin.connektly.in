@@ -21,6 +21,7 @@ import { formatCurrency, formatDateTime, formatNumber, labelize } from '../lib/f
 import LiveEventFeed from '../components/LiveEventFeed';
 import MetricCard from '../components/MetricCard';
 import Modal from '../components/Modal';
+import PageHeader from '../components/PageHeader';
 import Panel from '../components/Panel';
 import StatusBadge from '../components/StatusBadge';
 
@@ -179,14 +180,10 @@ export default function OrganizationsPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Organization Management</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-500">
-              Manage workspace organizations, support access, plan state, abuse risk, and billing activity.
-            </p>
-          </div>
+      <PageHeader
+        title="Organization Management"
+        description="Manage workspace organizations, support access, plan state, abuse risk, and billing activity."
+        actions={
           <button
             type="button"
             onClick={() => void loadOrganizations()}
@@ -195,8 +192,8 @@ export default function OrganizationsPage() {
             <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-        </div>
-      </section>
+        }
+      />
 
       {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
       {notice ? <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div> : null}
@@ -264,7 +261,7 @@ export default function OrganizationsPage() {
             ) : (
               <div className="thin-scrollbar overflow-x-auto rounded-2xl border border-gray-200">
                 <table className="min-w-[1120px] w-full border-collapse text-left text-sm">
-                  <thead className="bg-gray-50 text-xs uppercase tracking-[0.16em] text-gray-500">
+                  <thead className="sticky top-0 z-10 bg-gray-50 text-xs uppercase tracking-[0.16em] text-gray-500">
                     <tr>
                       <th className="px-4 py-3 font-semibold">Org Name</th>
                       <th className="px-4 py-3 font-semibold">Website</th>
@@ -657,19 +654,19 @@ export default function OrganizationsPage() {
                     <div className="grid gap-3 md:grid-cols-4">
                       <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Conversations</p>
-                        <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(detail.usageStats.conversations)}</p>
+                        <p className="mt-2 text-xl font-semibold text-gray-950">{formatNumber(detail.usageStats.conversations)}</p>
                       </div>
                       <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">API Usage</p>
-                        <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(detail.usageStats.apiUsage)}</p>
+                        <p className="mt-2 text-xl font-semibold text-gray-950">{formatNumber(detail.usageStats.apiUsage)}</p>
                       </div>
                       <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Messages</p>
-                        <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(detail.usageStats.messages)}</p>
+                        <p className="mt-2 text-xl font-semibold text-gray-950">{formatNumber(detail.usageStats.messages)}</p>
                       </div>
                       <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Webhooks</p>
-                        <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(detail.usageStats.webhookEvents)}</p>
+                        <p className="mt-2 text-xl font-semibold text-gray-950">{formatNumber(detail.usageStats.webhookEvents)}</p>
                       </div>
                     </div>
 

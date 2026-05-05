@@ -19,6 +19,7 @@ import type { AdminLiveEvent, WebhookReference, WebhookTokenRevealResponse, Webh
 import { formatDateTime, formatNumber, labelize } from '../lib/format';
 import LiveEventFeed from '../components/LiveEventFeed';
 import MetricCard from '../components/MetricCard';
+import PageHeader from '../components/PageHeader';
 import Panel from '../components/Panel';
 import StatusBadge from '../components/StatusBadge';
 
@@ -250,14 +251,10 @@ export default function WebhooksPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Webhook Manager</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-500">
-              Active webhook URLs, token reveal controls, and per-URL delivery logs across Meta, Messenger, payments, and developer endpoints.
-            </p>
-          </div>
+      <PageHeader
+        title="Webhook Manager"
+        description="Active webhook URLs, token reveal controls, and per-URL delivery logs across Meta, Messenger, payments, and developer endpoints."
+        actions={
           <button
             type="button"
             onClick={() => void load()}
@@ -266,8 +263,8 @@ export default function WebhooksPage() {
             <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-        </div>
-      </section>
+        }
+      />
 
       {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
       {tokenError ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{tokenError}</div> : null}
@@ -303,7 +300,7 @@ export default function WebhooksPage() {
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-base font-semibold text-gray-950">{webhook.name}</h3>
+                          <h3 className="text-sm font-semibold text-gray-950">{webhook.name}</h3>
                           <StatusBadge status={tone.label} severity={tone.severity} compact />
                         </div>
                         <p className="mt-1 text-sm text-gray-500">{webhook.provider}</p>
@@ -543,7 +540,7 @@ export default function WebhooksPage() {
                           <StatusBadge status={selectedEvent.status || selectedEvent.eventType} severity={selectedEvent.severity} compact />
                           <span className="text-xs text-gray-400">{formatDateTime(selectedEvent.occurredAt)}</span>
                         </div>
-                        <h3 className="mt-4 text-lg font-semibold text-white">{selectedEvent.title}</h3>
+                        <h3 className="mt-4 text-base font-semibold text-white">{selectedEvent.title}</h3>
                         {selectedEvent.description ? <p className="mt-2 text-sm leading-6 text-gray-300">{selectedEvent.description}</p> : null}
                         <div className="mt-4 grid gap-3 text-xs text-gray-400 sm:grid-cols-2">
                           <span>Source: {selectedEvent.source}</span>

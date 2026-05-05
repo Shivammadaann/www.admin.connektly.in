@@ -20,6 +20,7 @@ import type {
   UserPlatformSettings,
 } from '../lib/types';
 import { formatDateTime, labelize } from '../lib/format';
+import PageHeader from '../components/PageHeader';
 import Panel from '../components/Panel';
 import StatusBadge from '../components/StatusBadge';
 
@@ -159,14 +160,10 @@ export default function PlatformSettingsPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-950">User Platform Settings</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-500">
-              Control app.connektly.in pricing, feature availability, limits, keys, and transactional email templates from one place.
-            </p>
-          </div>
+      <PageHeader
+        title="User Platform Settings"
+        description="Control app.connektly.in pricing, feature availability, limits, keys, and transactional email templates from one place."
+        actions={
           <button
             type="button"
             onClick={() => void load()}
@@ -175,8 +172,8 @@ export default function PlatformSettingsPage() {
             <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-        </div>
-      </section>
+        }
+      />
 
       {warning ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{warning}</div> : null}
       {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
@@ -184,7 +181,7 @@ export default function PlatformSettingsPage() {
 
       {settings ? (
         <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-          <aside className="h-fit rounded-[24px] border border-gray-200 bg-white p-3 shadow-sm">
+          <aside className="h-fit rounded-[28px] border border-gray-200 bg-white/95 p-3 shadow-[0_18px_48px_rgba(15,23,42,0.05)] ring-1 ring-white/70">
             <nav className="space-y-1">
               {tabs.map((tab) => {
                 const isActive = activeTab === tab.id;

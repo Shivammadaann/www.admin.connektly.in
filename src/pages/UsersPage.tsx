@@ -20,6 +20,7 @@ import type { AdminLoginActivityEntry, AdminOrganizationRow, AdminUserDetail, Ad
 import { formatDateTime, formatNumber, labelize } from '../lib/format';
 import MetricCard from '../components/MetricCard';
 import Modal from '../components/Modal';
+import PageHeader from '../components/PageHeader';
 import Panel from '../components/Panel';
 import StatusBadge from '../components/StatusBadge';
 
@@ -254,14 +255,10 @@ export default function UsersPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Global Users</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-500">
-              View all users across organizations, filter by org, and review abuse or spam risk signals.
-            </p>
-          </div>
+      <PageHeader
+        title="Global Users"
+        description="View all users across organizations, filter by org, and review abuse or spam risk signals."
+        actions={
           <button
             type="button"
             onClick={() => void loadUsers()}
@@ -270,8 +267,8 @@ export default function UsersPage() {
             <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-        </div>
-      </section>
+        }
+      />
 
       {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
 
@@ -373,7 +370,7 @@ export default function UsersPage() {
         ) : (
           <div className="thin-scrollbar overflow-x-auto rounded-2xl border border-gray-200">
             <table className="min-w-[1120px] w-full border-collapse text-left text-sm">
-              <thead className="bg-gray-50 text-xs uppercase tracking-[0.16em] text-gray-500">
+              <thead className="sticky top-0 z-10 bg-gray-50 text-xs uppercase tracking-[0.16em] text-gray-500">
                 <tr>
                   <th className="px-4 py-3 font-semibold">User</th>
                   <th className="px-4 py-3 font-semibold">Organization</th>
@@ -523,7 +520,7 @@ export default function UsersPage() {
                   <div className="grid gap-3 md:grid-cols-3">
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Plan</p>
-                      <p className="mt-2 text-lg font-semibold text-gray-950">{labelize(selectedRow.selectedPlan || 'none')}</p>
+                      <p className="mt-2 text-base font-semibold text-gray-950">{labelize(selectedRow.selectedPlan || 'none')}</p>
                     </div>
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Last sign in</p>
@@ -531,7 +528,7 @@ export default function UsersPage() {
                     </div>
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Onboarding</p>
-                      <p className="mt-2 text-lg font-semibold text-gray-950">
+                      <p className="mt-2 text-base font-semibold text-gray-950">
                         {selectedRow.onboardingCompleted ? 'Complete' : 'Pending'}
                       </p>
                     </div>
@@ -559,19 +556,19 @@ export default function UsersPage() {
                   <div className="grid gap-3 md:grid-cols-4">
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Conversations</p>
-                      <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(asArray(detail.user.conversations).length)}</p>
+                      <p className="mt-2 text-xl font-semibold text-gray-950">{formatNumber(asArray(detail.user.conversations).length)}</p>
                     </div>
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Messages</p>
-                      <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(asArray(detail.user.messages).length)}</p>
+                      <p className="mt-2 text-xl font-semibold text-gray-950">{formatNumber(asArray(detail.user.messages).length)}</p>
                     </div>
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Calls</p>
-                      <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(asArray(detail.user.calls).length)}</p>
+                      <p className="mt-2 text-xl font-semibold text-gray-950">{formatNumber(asArray(detail.user.calls).length)}</p>
                     </div>
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Notices</p>
-                      <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(asArray(detail.user.notifications).length)}</p>
+                      <p className="mt-2 text-xl font-semibold text-gray-950">{formatNumber(asArray(detail.user.notifications).length)}</p>
                     </div>
                   </div>
                 </div>

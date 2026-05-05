@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
   Building2,
@@ -7,14 +8,17 @@ import {
   Loader2,
   MessageSquare,
   RefreshCcw,
+  ScrollText,
   TrendingDown,
   TrendingUp,
   Users,
+  Webhook,
 } from 'lucide-react';
 import { adminApi } from '../lib/adminApi';
 import { formatCurrency, formatDateTime, formatNumber } from '../lib/format';
 import type { AdminOverview, Severity } from '../lib/types';
 import Panel from '../components/Panel';
+import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 
 type Tone = 'violet' | 'emerald' | 'sky' | 'amber' | 'rose' | 'slate';
@@ -27,6 +31,13 @@ const toneClasses: Record<Tone, string> = {
   rose: 'bg-rose-50 text-rose-700 border-rose-100',
   slate: 'bg-slate-50 text-slate-700 border-slate-200',
 };
+
+const quickActions = [
+  { label: 'Review organizations', path: '/dashboard/organizations', Icon: Building2 },
+  { label: 'Open user directory', path: '/dashboard/users', Icon: Users },
+  { label: 'Check webhooks', path: '/dashboard/webhooks', Icon: Webhook },
+  { label: 'View logs', path: '/dashboard/logs-monitoring', Icon: ScrollText },
+];
 
 function CompactKpi({
   label,
@@ -42,17 +53,17 @@ function CompactKpi({
   tone?: Tone;
 }) {
   return (
-    <div className="rounded-[18px] border border-gray-200 bg-white p-4 shadow-sm">
+    <div className="rounded-[26px] border border-gray-200 bg-white/95 p-5 shadow-[0_14px_36px_rgba(15,23,42,0.05)] ring-1 ring-white/70">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">{label}</p>
-          <p className="mt-2 truncate text-2xl font-bold tracking-tight text-gray-950">{value}</p>
+          <p className="mt-3 truncate text-xl font-bold tracking-tight text-gray-950 sm:text-2xl">{value}</p>
         </div>
-        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border ${toneClasses[tone]}`}>
-          <Icon className="h-4 w-4" />
+        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border shadow-sm ${toneClasses[tone]}`}>
+          <Icon className="h-5 w-5" />
         </div>
       </div>
-      <p className="mt-2 truncate text-xs text-gray-500">{detail}</p>
+      <p className="mt-3 truncate text-sm text-gray-500">{detail}</p>
     </div>
   );
 }
@@ -221,39 +232,35 @@ export default function CommandCenter() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5">
-      <section className="rounded-[20px] border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Overview</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-500">
-              Global organization, usage, revenue, channel, and alert signals.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            {overview?.health ? (
-              <StatusBadge
-                status={overview.health.status}
-                severity={overview.health.status === 'ok' ? 'success' : overview.health.status === 'warning' ? 'warning' : 'critical'}
-              />
-            ) : null}
-            <button
-              type="button"
-              onClick={() => void load()}
-              className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
-            >
-              <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
-          </div>
-        </div>
-      </section>
+    <div className="mx-auto max-w-7xl space-y-6">
+      <PageHeader
+        title="Overview"
+        description="Global organization, usage, revenue, channel, and alert signals."
+        meta={
+          overview?.health ? (
+            <StatusBadge
+              status={overview.health.status}
+              severity={overview.health.status === 'ok' ? 'success' : overview.health.status === 'warning' ? 'warning' : 'critical'}
+            />
+          ) : null
+        }
+        actions={
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+          >
+            <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        }
+      />
 
       {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
 
       {overview ? (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {kpis.map((kpi) => (
               <CompactKpi key={kpi.label} {...kpi} />
             ))}
@@ -278,27 +285,44 @@ export default function CommandCenter() {
               </Panel>
             </div>
 
-            <Panel title="Alerts Panel" description={`Updated ${formatDateTime(overview.generatedAt)}`}>
-              <div className="space-y-3">
-                {overview.alerts.map((alert) => (
-                  <div key={alert.key} className={`rounded-2xl border p-4 ${alertTone(alert.severity)}`}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <AlertTriangle className="h-4 w-4 shrink-0" />
-                          <p className="truncate text-sm font-bold">{alert.label}</p>
+            <div className="space-y-5">
+              <Panel title="Alerts Panel" description={`Updated ${formatDateTime(overview.generatedAt)}`}>
+                <div className="space-y-3">
+                  {overview.alerts.map((alert) => (
+                    <div key={alert.key} className={`rounded-2xl border p-4 ${alertTone(alert.severity)}`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <AlertTriangle className="h-4 w-4 shrink-0" />
+                            <p className="truncate text-sm font-bold">{alert.label}</p>
+                          </div>
+                          <p className="mt-2 text-xs leading-5 opacity-80">{alert.detail}</p>
                         </div>
-                        <p className="mt-2 text-xs leading-5 opacity-80">{alert.detail}</p>
+                        <p className="shrink-0 text-lg font-bold">
+                          {formatNumber(alert.value)}
+                          {alert.suffix || ''}
+                        </p>
                       </div>
-                      <p className="shrink-0 text-xl font-bold">
-                        {formatNumber(alert.value)}
-                        {alert.suffix || ''}
-                      </p>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </Panel>
+                  ))}
+                </div>
+              </Panel>
+
+              <Panel title="Quick Actions">
+                <div className="grid gap-2">
+                  {quickActions.map((action) => (
+                    <Link
+                      key={action.path}
+                      to={action.path}
+                      className="flex items-center gap-3 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 transition hover:border-[#5b45ff] hover:bg-[#f5f3ff] hover:text-[#5b45ff]"
+                    >
+                      <action.Icon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{action.label}</span>
+                    </Link>
+                  ))}
+                </div>
+              </Panel>
+            </div>
           </div>
         </>
       ) : null}

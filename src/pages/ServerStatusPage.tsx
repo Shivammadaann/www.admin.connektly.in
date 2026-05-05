@@ -4,6 +4,7 @@ import { adminApi } from '../lib/adminApi';
 import type { ServerResponse } from '../lib/types';
 import { formatDateTime, formatNumber, labelize } from '../lib/format';
 import MetricCard from '../components/MetricCard';
+import PageHeader from '../components/PageHeader';
 import Panel from '../components/Panel';
 import StatusBadge from '../components/StatusBadge';
 import LiveEventFeed from '../components/LiveEventFeed';
@@ -39,14 +40,10 @@ export default function ServerStatusPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Server status</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-500">
-              Owner API health, Supabase checks, realtime bridge state, client API health, and table volumes.
-            </p>
-          </div>
+      <PageHeader
+        title="Server status"
+        description="Owner API health, Supabase checks, realtime bridge state, client API health, and table volumes."
+        actions={
           <button
             type="button"
             onClick={() => void load()}
@@ -55,8 +52,8 @@ export default function ServerStatusPage() {
             <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-        </div>
-      </section>
+        }
+      />
 
       {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
 
@@ -119,7 +116,7 @@ export default function ServerStatusPage() {
                 {data.tableCounts.map((entry) => (
                   <div key={entry.table} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">{entry.table}</p>
-                    <p className="mt-2 text-2xl font-semibold text-gray-950">{formatNumber(entry.count)}</p>
+                    <p className="mt-2 text-xl font-semibold text-gray-950">{formatNumber(entry.count)}</p>
                   </div>
                 ))}
               </div>

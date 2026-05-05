@@ -30,6 +30,7 @@ import type {
 } from '../lib/types';
 import { formatDateTime, formatNumber, labelize } from '../lib/format';
 import MetricCard from '../components/MetricCard';
+import PageHeader from '../components/PageHeader';
 import Panel from '../components/Panel';
 import StatusBadge from '../components/StatusBadge';
 
@@ -246,15 +247,11 @@ export default function ClientFeatureOperationsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5">
-      <section className="rounded-[20px] border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Client Feature Operations</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-500">
-              Admin visibility and controls for customer-facing feature records stored by app.connektly.in.
-            </p>
-          </div>
+    <div className="mx-auto max-w-7xl space-y-6">
+      <PageHeader
+        title="Client Feature Operations"
+        description="Admin visibility and controls for customer-facing feature records stored by app.connektly.in."
+        actions={
           <button
             type="button"
             onClick={() => void load()}
@@ -263,8 +260,8 @@ export default function ClientFeatureOperationsPage() {
             <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-        </div>
-      </section>
+        }
+      />
 
       {data ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -432,7 +429,7 @@ export default function ClientFeatureOperationsPage() {
                   <div className="space-y-4">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Workspace</p>
-                      <h2 className="mt-2 text-lg font-bold text-gray-950">{selectedRecord.organizationName}</h2>
+                      <h2 className="mt-2 text-base font-bold text-gray-950">{selectedRecord.organizationName}</h2>
                       <p className="mt-1 text-sm text-gray-500">{selectedRecord.ownerEmail || selectedRecord.ownerName}</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">

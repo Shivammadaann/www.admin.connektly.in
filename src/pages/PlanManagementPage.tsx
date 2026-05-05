@@ -4,6 +4,7 @@ import { adminApi } from '../lib/adminApi';
 import type { PlatformPricingPlan } from '../lib/types';
 import { formatCurrency, formatDateTime, formatNumber } from '../lib/format';
 import MetricCard from '../components/MetricCard';
+import PageHeader from '../components/PageHeader';
 import Panel from '../components/Panel';
 
 const inputClass = 'w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none transition focus:border-[#5b45ff] focus:ring-1 focus:ring-[#5b45ff]';
@@ -102,15 +103,11 @@ export default function PlanManagementPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Plan Management</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-500">
-              Manage global plan names, prices, and feature lists from one dashboard. Saved active plans power the public pricing page and the app onboarding checkout.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
+      <PageHeader
+        title="Plan Management"
+        description="Manage global plan names, prices, and feature lists from one dashboard. Saved active plans power the public pricing page and the app onboarding checkout."
+        actions={
+          <>
             <button
               type="button"
               onClick={() => void load()}
@@ -128,9 +125,9 @@ export default function PlanManagementPage() {
               {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Save plans
             </button>
-          </div>
-        </div>
-      </section>
+          </>
+        }
+      />
 
       <div className="grid gap-5 md:grid-cols-3">
         <MetricCard label="Active Plans" value={formatNumber(activePlans.length)} detail="Visible globally" Icon={CheckCircle2} tone="emerald" />

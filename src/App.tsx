@@ -39,7 +39,7 @@ function SetupRequired() {
         <div className="flex items-center gap-3">
           <BrandMark className="h-10 w-10" />
           <div>
-            <h1 className="text-xl font-bold">Connektly Admin Control Centre</h1>
+            <h1 className="text-lg font-bold">Connektly Admin Control Centre</h1>
             <p className="text-sm text-gray-400">Environment setup required</p>
           </div>
         </div>
@@ -120,16 +120,16 @@ function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#f3f4f6] px-4 py-8">
-      <div className="w-full max-w-md">
-        <div className="mb-6 flex items-center justify-center gap-3">
-          <BrandMark className="h-10 w-10" />
-          <div>
-            <p className="text-lg font-bold text-gray-950">Connektly</p>
-            <p className="text-xs font-medium text-gray-500">Admin Control Centre</p>
-          </div>
-        </div>
-
+      <div className="w-[min(calc(100%/1.1),28rem)] origin-center scale-110">
         <div className="rounded-[24px] border border-gray-200 bg-white p-6 shadow-sm sm:p-7">
+          <div className="mb-7 flex items-center justify-center gap-4">
+            <BrandMark className="h-14 w-14" />
+            <div>
+              <p className="text-xl font-bold leading-tight text-gray-950">Connektly</p>
+              <p className="text-sm font-medium text-gray-500">Admin Control Centre</p>
+            </div>
+          </div>
+
           {hasTurnstileSiteKey ? (
             <TurnstileWidget
               siteKey={clientConfig.turnstile.siteKey}
@@ -143,11 +143,8 @@ function LoginPage() {
 
           {mode === 'sign-in' ? (
             <form onSubmit={handleSubmit}>
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#f5f3ff] text-[#5b45ff]">
-                <LogIn className="h-5 w-5" />
-              </div>
-              <h1 className="mt-5 text-2xl font-bold tracking-tight text-gray-950">Admin sign in</h1>
-              <p className="mt-2 text-sm leading-6 text-gray-500">Use your invited admin account to continue.</p>
+              <h1 className="text-center text-xl font-bold tracking-tight text-gray-950">Admin sign in</h1>
+              <p className="mt-2 text-center text-sm leading-6 text-gray-500">Use your invited admin account to continue.</p>
 
               {error ? <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
 
@@ -216,7 +213,7 @@ function LoginPage() {
               <div className="mt-5 flex h-11 w-11 items-center justify-center rounded-2xl bg-[#eef2ff] text-[#5b45ff]">
                 <Mail className="h-5 w-5" />
               </div>
-              <h1 className="mt-5 text-2xl font-bold tracking-tight text-gray-950">Request admin access</h1>
+              <h1 className="mt-5 text-xl font-bold tracking-tight text-gray-950">Request admin access</h1>
               <p className="mt-2 text-sm leading-6 text-gray-500">Send your details to the Connektly admin team for review.</p>
 
               {error ? <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
@@ -367,7 +364,7 @@ function ProtectedAdmin({
       <div className="flex min-h-screen items-center justify-center bg-[#f3f4f6] p-6">
         <div className="max-w-lg rounded-[28px] border border-gray-200 bg-white p-7 text-center shadow-sm">
           <AlertTriangle className="mx-auto h-12 w-12 text-rose-500" />
-          <h1 className="mt-4 text-2xl font-bold text-gray-950">Owner access blocked</h1>
+          <h1 className="mt-4 text-xl font-bold text-gray-950">Owner access blocked</h1>
           <p className="mt-3 text-sm leading-6 text-gray-500">{error}</p>
           <button
             type="button"

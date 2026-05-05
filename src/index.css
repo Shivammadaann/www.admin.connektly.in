@@ -21,11 +21,63 @@ body {
     sans-serif;
 }
 
-button,
-[role="button"],
-select,
-input[type="checkbox"] {
+:where(
+  a[href],
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="menuitem"]:not([aria-disabled="true"]),
+  [role="tab"]:not([aria-disabled="true"]),
+  [role="option"]:not([aria-disabled="true"]),
+  summary,
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  label:has(input[type="file"]:not(:disabled))
+) {
   cursor: pointer;
+}
+
+:where(button:disabled, select:disabled, input:disabled, textarea:disabled, [aria-disabled="true"]) {
+  cursor: not-allowed;
+}
+
+:where(
+  button,
+  a[href],
+  [role="button"],
+  [role="menuitem"],
+  [role="tab"],
+  [role="option"],
+  select,
+  input,
+  textarea
+):focus-visible {
+  outline: 2px solid rgb(91 69 255 / 70%);
+  outline-offset: 2px;
+}
+
+.admin-shell :where(table) {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.admin-shell :where(th) {
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.admin-shell :where(td) {
+  vertical-align: top;
+}
+
+.admin-shell :where(tbody tr) {
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.admin-shell :where(input, select, textarea) {
+  min-width: 0;
 }
 
 .scrollbar-hide {
@@ -49,6 +101,35 @@ input[type="checkbox"] {
 .thin-scrollbar::-webkit-scrollbar-thumb {
   background: #cbd5e1;
   border-radius: 999px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :where(
+    a[href],
+    button:not(:disabled),
+    [role="button"]:not([aria-disabled="true"]),
+    [role="menuitem"]:not([aria-disabled="true"]),
+    [role="tab"]:not([aria-disabled="true"]),
+    [role="option"]:not([aria-disabled="true"]),
+    summary,
+    select:not(:disabled),
+    input[type="checkbox"]:not(:disabled),
+    input[type="radio"]:not(:disabled)
+  ) {
+    transition-duration: 180ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 @media (max-width: 767px) {

@@ -6,6 +6,7 @@ import type { AuditResponse } from '../lib/types';
 import { formatDateTime, labelize } from '../lib/format';
 import LiveEventFeed from '../components/LiveEventFeed';
 import MetricCard from '../components/MetricCard';
+import PageHeader from '../components/PageHeader';
 import Panel from '../components/Panel';
 import StatusBadge from '../components/StatusBadge';
 
@@ -51,14 +52,10 @@ export default function AuditPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Owner activity</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-500">
-              Admin actions, live operational events, and persisted audit history when the admin migration is applied.
-            </p>
-          </div>
+      <PageHeader
+        title="Owner activity"
+        description="Admin actions, live operational events, and persisted audit history when the admin migration is applied."
+        actions={
           <button
             type="button"
             onClick={() => void load()}
@@ -67,8 +64,8 @@ export default function AuditPage() {
             <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-        </div>
-      </section>
+        }
+      />
 
       {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
       {data?.warning ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{data.warning}</div> : null}

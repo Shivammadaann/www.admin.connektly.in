@@ -14,6 +14,7 @@ import { adminApi } from '../lib/adminApi';
 import type { WebsiteLeadFormsResponse, WebsiteLeadSubmission, WebsiteLeadSubmissionType } from '../lib/types';
 import { formatDateTime, formatNumber, labelize } from '../lib/format';
 import MetricCard from '../components/MetricCard';
+import PageHeader from '../components/PageHeader';
 import Panel from '../components/Panel';
 
 type TabId = 'booked_demo' | 'lead_inquiry';
@@ -83,7 +84,7 @@ function SubmissionCard({ submission, publicBaseUrl }: { submission: WebsiteLead
               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{labelize(submission.topic)}</span>
             ) : null}
           </div>
-          <h3 className="mt-3 text-lg font-semibold text-gray-950">{submission.name || 'Unnamed lead'}</h3>
+          <h3 className="mt-3 text-base font-semibold text-gray-950">{submission.name || 'Unnamed lead'}</h3>
           <p className="mt-1 text-sm text-gray-500">{formatDateTime(submission.submittedAt)}</p>
         </div>
         {sourceUrl ? (
@@ -187,14 +188,10 @@ export default function WebsiteLeadFormDataPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Lead Form Data</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-500">
-              Review HTML form submissions captured across the public website. Demo bookings and lead inquiries stay separated for follow-up.
-            </p>
-          </div>
+      <PageHeader
+        title="Lead Form Data"
+        description="Review HTML form submissions captured across the public website. Demo bookings and lead inquiries stay separated for follow-up."
+        actions={
           <button
             type="button"
             onClick={() => void load()}
@@ -203,8 +200,8 @@ export default function WebsiteLeadFormDataPage() {
             <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-        </div>
-      </section>
+        }
+      />
 
       {data ? (
         <div className="grid gap-5 md:grid-cols-4">

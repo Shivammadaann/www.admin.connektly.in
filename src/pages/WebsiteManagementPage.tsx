@@ -15,6 +15,7 @@ import { adminApi } from '../lib/adminApi';
 import type { WebsiteBlogPost, WebsiteContentResponse, WebsiteHelpArticle } from '../lib/types';
 import { formatDateTime, formatNumber } from '../lib/format';
 import MetricCard from '../components/MetricCard';
+import PageHeader from '../components/PageHeader';
 import Panel from '../components/Panel';
 
 type TabId = 'blogs' | 'help';
@@ -434,15 +435,11 @@ export default function WebsiteManagementPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Website Management</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-500">
-              Manage public website blogs and Help Center content from the centralized Admin Control Centre.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
+      <PageHeader
+        title="Website Management"
+        description="Manage public website blogs and Help Center content from the centralized Admin Control Centre."
+        actions={
+          <>
             <a
               href={resolveWebsiteUrl(activeTab === 'blogs' ? '/blogs/' : '/help/', publicBaseUrl)}
               target="_blank"
@@ -459,9 +456,9 @@ export default function WebsiteManagementPage() {
               <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
               Refresh
             </button>
-          </div>
-        </div>
-      </section>
+          </>
+        }
+      />
 
       {data ? (
         <div className="grid gap-5 md:grid-cols-3">

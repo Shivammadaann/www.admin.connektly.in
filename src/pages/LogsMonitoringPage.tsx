@@ -14,6 +14,7 @@ import {
 import { adminApi } from '../lib/adminApi';
 import type { AdminLogEntry, AuditResponse, LogsMonitoringResponse, ServerResponse } from '../lib/types';
 import { formatDateTime, formatNumber, labelize } from '../lib/format';
+import PageHeader from '../components/PageHeader';
 import Panel from '../components/Panel';
 import StatusBadge from '../components/StatusBadge';
 
@@ -93,7 +94,7 @@ function LogsTable({ logs }: { logs: AdminLogEntry[] }) {
               <StatusBadge status={selectedLog.status} severity={selectedLog.severity} compact />
               <span className="text-xs text-gray-500">{formatDateTime(selectedLog.occurredAt)}</span>
             </div>
-            <h3 className="mt-4 text-lg font-semibold text-gray-950">{selectedLog.title}</h3>
+            <h3 className="mt-4 text-base font-semibold text-gray-950">{selectedLog.title}</h3>
             {selectedLog.detail ? <p className="mt-2 text-sm leading-6 text-gray-500">{selectedLog.detail}</p> : null}
             <div className="mt-4 grid gap-3 text-xs text-gray-500 sm:grid-cols-2">
               <span>Source: {selectedLog.source}</span>
@@ -128,15 +129,15 @@ function ServerStatusPanel({ data }: { data: ServerResponse | null }) {
           </div>
           <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">DB Latency</p>
-            <p className="mt-2 text-2xl font-bold text-gray-950">{data.health.dbLatencyMs ?? 'N/A'}ms</p>
+            <p className="mt-2 text-xl font-bold text-gray-950">{data.health.dbLatencyMs ?? 'N/A'}ms</p>
           </div>
           <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Realtime</p>
-            <p className="mt-2 text-lg font-bold text-gray-950">{labelize(data.health.realtime.status)}</p>
+            <p className="mt-2 text-base font-bold text-gray-950">{labelize(data.health.realtime.status)}</p>
           </div>
           <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Memory</p>
-            <p className="mt-2 text-lg font-bold text-gray-950">{data.health.memory.heapUsedMb}MB heap</p>
+            <p className="mt-2 text-base font-bold text-gray-950">{data.health.memory.heapUsedMb}MB heap</p>
           </div>
         </div>
       </Panel>
@@ -160,7 +161,7 @@ function ServerStatusPanel({ data }: { data: ServerResponse | null }) {
             {data.tableCounts.slice(0, 9).map((entry) => (
               <div key={entry.table} className="rounded-2xl border border-gray-200 bg-white p-4">
                 <p className="truncate text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">{entry.table}</p>
-                <p className="mt-2 text-xl font-bold text-gray-950">{formatNumber(entry.count)}</p>
+                <p className="mt-2 text-lg font-bold text-gray-950">{formatNumber(entry.count)}</p>
               </div>
             ))}
           </div>
@@ -178,11 +179,11 @@ function AuditPanel({ data }: { data: AuditResponse | null }) {
       <div className="grid gap-3">
         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Persisted audit rows</p>
-          <p className="mt-2 text-3xl font-bold text-gray-950">{formatNumber(data.auditEvents.length)}</p>
+          <p className="mt-2 text-2xl font-bold text-gray-950">{formatNumber(data.auditEvents.length)}</p>
         </div>
         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Live audit events</p>
-          <p className="mt-2 text-3xl font-bold text-gray-950">{formatNumber(data.liveEvents.length)}</p>
+          <p className="mt-2 text-2xl font-bold text-gray-950">{formatNumber(data.liveEvents.length)}</p>
         </div>
       </div>
 
@@ -266,15 +267,11 @@ export default function LogsMonitoringPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5">
-      <section className="rounded-[20px] border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Logs & Monitoring</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-500">
-              API, error, webhook, delivery, server, and security audit visibility for dev and ops.
-            </p>
-          </div>
+    <div className="mx-auto max-w-7xl space-y-6">
+      <PageHeader
+        title="Logs & Monitoring"
+        description="API, error, webhook, delivery, server, and security audit visibility for dev and ops."
+        actions={
           <button
             type="button"
             onClick={() => void load()}
@@ -283,12 +280,12 @@ export default function LogsMonitoringPage() {
             <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-        </div>
-      </section>
+        }
+      />
 
       {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
 
-      <div className="rounded-[20px] border border-gray-200 bg-white p-3 shadow-sm">
+      <div className="rounded-[28px] border border-gray-200 bg-white/95 p-3 shadow-[0_18px_48px_rgba(15,23,42,0.05)] ring-1 ring-white/70">
         <div className="flex flex-wrap gap-2">
           {tabs.map((tab) => {
             const isActive = activeTab === tab.id;

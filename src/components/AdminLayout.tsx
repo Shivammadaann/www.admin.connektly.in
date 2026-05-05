@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   Activity,
   AlertTriangle,
@@ -7,6 +6,8 @@ import {
   BookOpenText,
   Boxes,
   Building2,
+  ChevronDown,
+  ChevronRight,
   CreditCard,
   Gauge,
   Globe2,
@@ -15,14 +16,15 @@ import {
   Loader2,
   LogOut,
   Menu,
-  Search,
   Settings,
   SlidersHorizontal,
   ScrollText,
   Users,
   Webhook,
   X,
+  type LucideIcon,
 } from 'lucide-react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useLiveEvents } from '../lib/liveEvents';
 import { adminApi } from '../lib/adminApi';
@@ -32,48 +34,71 @@ import BrandMark from './BrandMark';
 import LiveEventFeed from './LiveEventFeed';
 import Modal from './Modal';
 
-type NavItem = { label: string; path: string; icon: typeof LayoutDashboard; permissions?: AdminPermissionKey[] };
+type NavItem = { label: string; path: string; icon: LucideIcon; permissions?: AdminPermissionKey[] };
+type NavSection = { id: string; title: string; icon: LucideIcon; items: NavItem[] };
 
 const navSections = [
   {
-    title: null,
+    id: 'command',
+    title: 'Command Center',
+    icon: LayoutDashboard,
     items: [
       { label: 'Overview', path: '/dashboard', icon: LayoutDashboard, permissions: ['command_center'] },
-      { label: 'Organization Management', path: '/dashboard/organizations', icon: Building2, permissions: ['organizations'] },
-      { label: 'Global Users', path: '/dashboard/users', icon: Users, permissions: ['global_users'] },
-      { label: 'Plan Management', path: '/dashboard/plans', icon: CreditCard, permissions: ['plan_management'] },
-      { label: 'Payments', path: '/dashboard/payments', icon: CreditCard, permissions: ['payments'] },
-      { label: 'User Platform Settings', path: '/dashboard/platform-settings', icon: SlidersHorizontal, permissions: ['platform_settings'] },
-      { label: 'Global Integrations', path: '/dashboard/global-integrations', icon: Globe2, permissions: ['global_integrations'] },
-      { label: 'Client Feature Operations', path: '/dashboard/client-features', icon: Boxes, permissions: ['global_integrations'] },
-      { label: 'Admin Profile', path: '/dashboard/settings', icon: Settings },
     ],
   },
   {
+    id: 'customers',
+    title: 'Customers',
+    icon: Building2,
+    items: [
+      { label: 'Organization Management', path: '/dashboard/organizations', icon: Building2, permissions: ['organizations'] },
+      { label: 'Global Users', path: '/dashboard/users', icon: Users, permissions: ['global_users'] },
+    ],
+  },
+  {
+    id: 'revenue',
+    title: 'Revenue',
+    icon: CreditCard,
+    items: [
+      { label: 'Plan Management', path: '/dashboard/plans', icon: CreditCard, permissions: ['plan_management'] },
+      { label: 'Payments', path: '/dashboard/payments', icon: CreditCard, permissions: ['payments'] },
+    ],
+  },
+  {
+    id: 'client-app',
+    title: 'Client App',
+    icon: Boxes,
+    items: [
+      { label: 'Client Feature Operations', path: '/dashboard/client-features', icon: Boxes, permissions: ['global_integrations'] },
+      { label: 'User Platform Settings', path: '/dashboard/platform-settings', icon: SlidersHorizontal, permissions: ['platform_settings'] },
+      { label: 'Global Integrations', path: '/dashboard/global-integrations', icon: Globe2, permissions: ['global_integrations'] },
+    ],
+  },
+  {
+    id: 'website',
     title: 'Website Management',
+    icon: BookOpenText,
     items: [
       { label: 'Blogs & Help Center', path: '/dashboard/website', icon: BookOpenText, permissions: ['website_management'] },
       { label: 'Lead Form Data', path: '/dashboard/website-leads', icon: Inbox, permissions: ['website_management'] },
     ],
   },
   {
-    title: 'Webhook Manager',
+    id: 'system',
+    title: 'System & Security',
+    icon: ScrollText,
     items: [
       { label: 'Webhook Manager', path: '/dashboard/webhooks', icon: Webhook, permissions: ['webhooks'] },
-    ],
-  },
-  {
-    title: 'Logs & Monitoring',
-    items: [
       {
         label: 'Logs & Monitoring',
         path: '/dashboard/logs-monitoring',
         icon: ScrollText,
         permissions: ['logs_monitoring', 'webhooks', 'server_status', 'security_audit'],
       },
+      { label: 'Admin Profile', path: '/dashboard/settings', icon: Settings },
     ],
   },
-] satisfies Array<{ title: string | null; items: NavItem[] }>;
+] satisfies NavSection[];
 
 type AdminLayoutProps = {
   adminEmail: string | null;
@@ -82,21 +107,30 @@ type AdminLayoutProps = {
 
 export default function AdminLayout({ adminEmail, adminAccess }: AdminLayoutProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { events, status, unreadCount, clearUnread } = useLiveEvents();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [feedOpen, setFeedOpen] = useState(false);
   const [signOutDialogOpen, setSignOutDialogOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [openSectionIds, setOpenSectionIds] = useState<Set<string>>(() => new Set(['command']));
   const [ownerProfile, setOwnerProfile] = useState<{ fullName: string; avatarUrl: string | null } | null>(null);
   const feedRef = useRef<HTMLDivElement | null>(null);
   const displayName = ownerProfile?.fullName || adminEmail?.split('@')[0] || 'Owner';
   const avatarUrl = ownerProfile?.avatarUrl || null;
   const statusTone = status === 'connected' ? 'bg-emerald-400' : status === 'connecting' ? 'bg-amber-400' : 'bg-rose-400';
-  const canViewItem = (item: NavItem) =>
-    !item.permissions || adminAccess?.isPrimaryOwner || item.permissions.some((permission) => adminAccess?.permissions.includes(permission));
-  const visibleNavSections = navSections
-    .map((section) => ({ ...section, items: section.items.filter(canViewItem) }))
-    .filter((section) => section.items.length > 0);
+  const visibleNavSections = useMemo(() => {
+    const canViewItem = (item: NavItem) =>
+      !item.permissions || adminAccess?.isPrimaryOwner || item.permissions.some((permission) => adminAccess?.permissions.includes(permission));
+
+    return navSections
+      .map((section) => ({ ...section, items: section.items.filter(canViewItem) }))
+      .filter((section) => section.items.length > 0);
+  }, [adminAccess]);
+
+  const isItemActive = (item: NavItem) =>
+    location.pathname === item.path || (item.path !== '/dashboard' && location.pathname.startsWith(item.path));
+  const isSectionActive = (section: NavSection) => section.items.some(isItemActive);
 
   const currentTime = useMemo(
     () =>
@@ -108,6 +142,30 @@ export default function AdminLayout({ adminEmail, adminAccess }: AdminLayoutProp
       }),
     [],
   );
+
+  useEffect(() => {
+    const activeSection = visibleNavSections.find(isSectionActive);
+    if (!activeSection) return;
+
+    setOpenSectionIds((current) => {
+      if (current.has(activeSection.id)) return current;
+      const next = new Set(current);
+      next.add(activeSection.id);
+      return next;
+    });
+  }, [location.pathname, visibleNavSections]);
+
+  const toggleSection = (sectionId: string) => {
+    setOpenSectionIds((current) => {
+      const next = new Set(current);
+      if (next.has(sectionId)) {
+        next.delete(sectionId);
+      } else {
+        next.add(sectionId);
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!feedOpen) return;
@@ -173,12 +231,12 @@ export default function AdminLayout({ adminEmail, adminAccess }: AdminLayoutProp
   };
 
   const sidebar = (
-    <aside className="flex h-full w-72 flex-col bg-[#111827] text-gray-400">
+    <aside className="flex h-full w-72 flex-col border-r border-gray-800 bg-[#111827] text-gray-400">
       <div className="flex h-16 items-center justify-between border-b border-gray-800 px-4">
         <div className="flex min-w-0 items-center gap-3">
           <BrandMark className="h-8 w-8 shrink-0" />
           <div className="min-w-0">
-            <p className="truncate text-xl font-bold tracking-tight text-white">Connektly</p>
+            <p className="truncate text-lg font-bold tracking-tight text-white">Connektly</p>
             <p className="truncate text-xs font-medium text-gray-500">Admin Control Centre</p>
           </div>
         </div>
@@ -194,33 +252,83 @@ export default function AdminLayout({ adminEmail, adminAccess }: AdminLayoutProp
 
       <div className="flex-1 overflow-y-auto px-3 py-4 scrollbar-hide">
         <nav className="space-y-1">
-          {visibleNavSections.map((section, sectionIndex) => (
-            <div key={section.title || `main-${sectionIndex}`} className={sectionIndex === 0 ? 'space-y-1' : 'mt-5 space-y-1'}>
-              {section.title ? (
-                <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">{section.title}</p>
-              ) : null}
-              {section.items.map((item) => (
+          {visibleNavSections.map((section) => {
+            const active = isSectionActive(section);
+            const isOpen = openSectionIds.has(section.id);
+            const SectionIcon = section.icon;
+
+            if (section.items.length === 1) {
+              const item = section.items[0];
+              return (
                 <NavLink
-                  key={item.path}
+                  key={section.id}
                   to={item.path}
                   end={item.path === '/dashboard'}
                   onClick={() => setMobileOpen(false)}
                   className={({ isActive }) =>
                     `flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium transition ${
-                      isActive ? 'bg-[#5b45ff] text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                      isActive ? 'bg-[#5b45ff] text-white shadow-lg shadow-[#5b45ff]/20' : 'text-gray-300 hover:bg-gray-800 hover:text-white'
                     }`
                   }
                 >
                   {({ isActive }) => (
                     <>
-                      <item.icon className={`h-5 w-5 shrink-0 ${isActive ? 'text-white' : 'text-gray-400'}`} />
+                      <SectionIcon className={`h-5 w-5 shrink-0 ${isActive ? 'text-white' : 'text-gray-400'}`} />
                       <span className="truncate">{item.label}</span>
                     </>
                   )}
                 </NavLink>
-              ))}
-            </div>
-          ))}
+              );
+            }
+
+            return (
+              <div key={section.id} className="space-y-1">
+                <button
+                  type="button"
+                  onClick={() => toggleSection(section.id)}
+                  className={`flex w-full items-center justify-between rounded-2xl px-3 py-3 text-sm font-medium transition ${
+                    active ? 'bg-gray-800 text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                  }`}
+                  aria-expanded={isOpen}
+                >
+                  <span className="flex min-w-0 items-center gap-3">
+                    <SectionIcon className={`h-5 w-5 shrink-0 ${active ? 'text-white' : 'text-gray-400'}`} />
+                    <span className="truncate">{section.title}</span>
+                  </span>
+                  {isOpen ? (
+                    <ChevronDown className="h-4 w-4 shrink-0 text-gray-500" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 shrink-0 text-gray-500" />
+                  )}
+                </button>
+
+                {isOpen ? (
+                  <div className="space-y-1 pl-4">
+                    {section.items.map((item) => (
+                      <NavLink
+                        key={item.path}
+                        to={item.path}
+                        end={item.path === '/dashboard'}
+                        onClick={() => setMobileOpen(false)}
+                        className={({ isActive }) =>
+                          `flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition ${
+                            isActive ? 'bg-[#5b45ff] text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                          }`
+                        }
+                      >
+                        {({ isActive }) => (
+                          <>
+                            <item.icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-white' : 'text-gray-500'}`} />
+                            <span className="truncate">{item.label}</span>
+                          </>
+                        )}
+                      </NavLink>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </nav>
       </div>
 
@@ -250,14 +358,14 @@ export default function AdminLayout({ adminEmail, adminAccess }: AdminLayoutProp
 
   return (
     <>
-      <div className="flex h-[100dvh] overflow-hidden bg-[#f3f4f6]">
+      <div className="admin-shell flex h-[100dvh] overflow-hidden bg-[#f3f4f6]">
       <div className="hidden md:block">{sidebar}</div>
 
       {mobileOpen ? (
         <div className="fixed inset-0 z-50 md:hidden">
           <button
             type="button"
-            className="absolute inset-0 bg-slate-950/60"
+            className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
             onClick={() => setMobileOpen(false)}
             aria-label="Close mobile menu"
           />
@@ -276,13 +384,6 @@ export default function AdminLayout({ adminEmail, adminAccess }: AdminLayoutProp
             >
               <Menu className="h-5 w-5" />
             </button>
-            <div className="hidden min-w-0 max-w-xl flex-1 items-center rounded-xl bg-[#1f2937] px-4 py-2.5 text-gray-400 sm:flex">
-              <Search className="h-5 w-5 shrink-0" />
-              <input
-                className="ml-3 min-w-0 flex-1 bg-transparent text-sm text-gray-200 outline-none placeholder:text-gray-500"
-                placeholder="Search users, webhooks, payments..."
-              />
-            </div>
             <div className="hidden items-center gap-2 rounded-full border border-gray-800 bg-gray-900 px-3 py-1.5 text-xs font-medium text-gray-400 lg:flex">
               <span className={`h-2 w-2 rounded-full ${statusTone}`} />
               Live {status}
@@ -317,7 +418,7 @@ export default function AdminLayout({ adminEmail, adminAccess }: AdminLayoutProp
                   <div className="mb-4 flex items-center justify-between gap-3">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Live stream</p>
-                      <h3 className="mt-1 text-lg font-semibold">Recent events</h3>
+                      <h3 className="mt-1 text-base font-semibold">Recent events</h3>
                     </div>
                     <div className="flex items-center gap-2 rounded-full border border-gray-200 px-3 py-1.5 text-xs text-gray-500">
                       <Activity className="h-3.5 w-3.5" />
@@ -340,7 +441,7 @@ export default function AdminLayout({ adminEmail, adminAccess }: AdminLayoutProp
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-3 sm:p-6">
+        <main className="flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top_left,rgba(91,69,255,0.08),transparent_28rem)] p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:p-6 lg:p-8">
           <Outlet />
         </main>
       </div>

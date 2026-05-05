@@ -4,6 +4,7 @@ import { adminApi } from '../lib/adminApi';
 import type { PaymentsResponse } from '../lib/types';
 import { formatDateTime, formatNumber, labelize } from '../lib/format';
 import MetricCard from '../components/MetricCard';
+import PageHeader from '../components/PageHeader';
 import Panel from '../components/Panel';
 import StatusBadge from '../components/StatusBadge';
 
@@ -76,14 +77,10 @@ export default function PaymentsPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Billing and credit control</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-500">
-              Subscription state, Razorpay references, WhatsApp credits, and payment webhook activity.
-            </p>
-          </div>
+      <PageHeader
+        title="Billing and credit control"
+        description="Subscription state, Razorpay references, WhatsApp credits, and payment webhook activity."
+        actions={
           <button
             type="button"
             onClick={() => void load()}
@@ -92,8 +89,8 @@ export default function PaymentsPage() {
             <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-        </div>
-      </section>
+        }
+      />
 
       {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
 
@@ -138,7 +135,7 @@ export default function PaymentsPage() {
             <Panel title="Workspace subscriptions" description={`Generated ${formatDateTime(data.generatedAt)}`}>
               <div className="thin-scrollbar overflow-x-auto">
                 <table className="min-w-full text-left text-sm">
-                  <thead>
+                  <thead className="sticky top-0 z-10 bg-white">
                     <tr className="border-b border-gray-100 text-xs uppercase tracking-[0.16em] text-gray-500">
                       <th className="pb-3 pr-4 font-semibold">Workspace</th>
                       <th className="pb-3 pr-4 font-semibold">Plan</th>

@@ -21,6 +21,7 @@ import {
 import { adminApi } from '../lib/adminApi';
 import type { AdminPermissionKey, AdminUserRow, DashboardAdminUsersResponse, OwnerSettingsResponse } from '../lib/types';
 import { formatDateTime, getInitials, labelize } from '../lib/format';
+import PageHeader from '../components/PageHeader';
 import Panel from '../components/Panel';
 import StatusBadge from '../components/StatusBadge';
 
@@ -375,14 +376,10 @@ export default function OwnerSettingsPage() {
         </div>
       ) : null}
 
-      <section className="rounded-[24px] border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Admin Profile</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-500">
-              Manage the admin identity, organization details, login security, dashboard users, and internal alert preferences.
-            </p>
-          </div>
+      <PageHeader
+        title="Admin Profile"
+        description="Manage the admin identity, organization details, login security, dashboard users, and internal alert preferences."
+        actions={
           <button
             type="button"
             onClick={() => void load()}
@@ -391,14 +388,14 @@ export default function OwnerSettingsPage() {
             <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-        </div>
-      </section>
+        }
+      />
 
       {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
       {notice ? <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div> : null}
 
       <div className="grid gap-6 lg:grid-cols-[290px_minmax(0,1fr)]">
-        <aside className="h-fit rounded-[24px] border border-gray-200 bg-white p-3 shadow-sm">
+        <aside className="h-fit rounded-[28px] border border-gray-200 bg-white/95 p-3 shadow-[0_18px_48px_rgba(15,23,42,0.05)] ring-1 ring-white/70">
           <nav className="space-y-1">
             {tabs.map((tab) => {
               const isActive = activeTab === tab.id;
@@ -424,14 +421,14 @@ export default function OwnerSettingsPage() {
             <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
               <Panel title="Profile Picture" className="h-fit">
                 <div className="rounded-[24px] border border-dashed border-gray-200 bg-gray-50 px-5 py-8 text-center">
-                  <div className="mx-auto flex h-28 w-28 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-[#dffbea] text-3xl font-bold text-emerald-600 shadow-lg">
+                  <div className="mx-auto flex h-28 w-28 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-[#dffbea] text-2xl font-bold text-emerald-600 shadow-lg">
                     {avatarPreview ? (
                       <img src={avatarPreview} alt={settings.profile.fullName} className="h-full w-full object-cover" />
                     ) : (
                       getInitials(settings.profile.fullName)
                     )}
                   </div>
-                  <h2 className="mt-5 text-lg font-bold text-gray-950">{settings.profile.fullName}</h2>
+                  <h2 className="mt-5 text-base font-bold text-gray-950">{settings.profile.fullName}</h2>
                   <p className="mt-2 text-sm leading-6 text-gray-500">Admin account profile image</p>
                   <label className="mt-6 inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-800 transition hover:bg-gray-50">
                     {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
@@ -599,10 +596,10 @@ export default function OwnerSettingsPage() {
 
                 <Panel title="Admin Card">
                 <div className="rounded-[24px] border border-gray-200 bg-gray-50 p-5 text-center">
-                  <div className="mx-auto flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-white text-xl font-bold text-[#5b45ff] shadow-sm">
+                  <div className="mx-auto flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-white text-lg font-bold text-[#5b45ff] shadow-sm">
                     {avatarPreview ? <img src={avatarPreview} alt={form.fullName} className="h-full w-full object-cover" /> : getInitials(form.fullName)}
                   </div>
-                  <h3 className="mt-4 text-xl font-bold text-gray-950">{form.fullName}</h3>
+                  <h3 className="mt-4 text-lg font-bold text-gray-950">{form.fullName}</h3>
                   <p className="mt-1 text-sm text-gray-500">{form.roleTitle || 'Admin'}</p>
                   <div className="mt-4 rounded-2xl bg-white p-4 text-left text-sm">
                     <p className="font-semibold text-gray-950">{form.organizationName || 'Connektly'}</p>
@@ -705,11 +702,11 @@ export default function OwnerSettingsPage() {
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Role</p>
-                      <p className="mt-2 text-lg font-bold text-gray-950">{labelize(settings.access.role)}</p>
+                      <p className="mt-2 text-base font-bold text-gray-950">{labelize(settings.access.role)}</p>
                     </div>
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Primary Owner</p>
-                      <p className="mt-2 truncate text-lg font-bold text-gray-950">{settings.access.primaryOwnerEmail}</p>
+                      <p className="mt-2 truncate text-base font-bold text-gray-950">{settings.access.primaryOwnerEmail}</p>
                     </div>
                   </div>
                   <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
