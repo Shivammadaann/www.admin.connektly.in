@@ -6,6 +6,8 @@ export type AdminLiveEvent = {
   source: string;
   eventType: string;
   table?: string;
+  webhookId?: string;
+  webhookIds?: string[];
   userId?: string | null;
   title: string;
   description?: string;
@@ -666,6 +668,7 @@ export type WebhooksResponse = {
   summary: {
     leadConfigs: number;
     activeLeadConfigs: number;
+    activeWebhookUrls: number;
     messengerWebhookErrors: number;
     events24h: number;
     failedEvents: number;
@@ -679,6 +682,30 @@ export type WebhooksResponse = {
   generatedAt: string;
 };
 
+export type WebhookTokenPreview = {
+  source: string;
+  scope: 'environment' | 'workspace' | 'endpoint' | 'external';
+  hasToken: boolean;
+  maskedValue: string | null;
+  count: number;
+};
+
+export type WebhookTokenValue = {
+  id: string;
+  label: string;
+  value: string;
+  maskedValue: string;
+  source: string;
+  userId: string | null;
+  updatedAt: string | null;
+};
+
+export type WebhookTokenRevealResponse = {
+  webhookId: string;
+  tokens: WebhookTokenValue[];
+  generatedAt: string;
+};
+
 export type WebhookReference = {
   id: string;
   name: string;
@@ -687,9 +714,14 @@ export type WebhookReference = {
   provider: string;
   purpose: string;
   verifyTokenEnv?: string;
+  token: WebhookTokenPreview;
   events: string[];
   status: 'configured' | 'needs_base_url' | 'external';
   notes?: string;
+  eventCount: number;
+  successCount: number;
+  failureCount: number;
+  lastEventAt: string | null;
 };
 
 export type ServerResponse = {

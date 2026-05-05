@@ -67,9 +67,13 @@ If the frontend does not have Supabase URL and anon key, the app shows a setup-r
 4. LOGIN AND ACCESS FLOW
 
 Login:
-- /login renders the owner sign-in screen.
+- /login renders a plain centered Admin Control Centre sign-in screen.
 - Users sign in with Supabase email/password auth.
 - Cloudflare Turnstile is supported through TurnstileWidget and a captcha token is passed to Supabase signInWithPassword when a Turnstile site key is available.
+- Turnstile runs in invisible mode on the login page, so the captcha UI container is not shown.
+- The login page has no sign-up flow.
+- Users can submit a "Request to Join Admin Control Panel" form with name, email, and number.
+- Join requests are sent to POST /api/admin/access-request and emailed to ADMIN_ACCESS_REQUEST_EMAIL.
 - After successful login, the app redirects authenticated users to /dashboard.
 
 Session handling:
@@ -593,13 +597,14 @@ Backend working:
 - owner_admin_users stores admin roles, statuses, permission arrays, invitation metadata, and auth_user_id links.
 - Admin management is primary-owner-only.
 - All profile, account, and admin-user changes are audited.
+- Public access requests from the login page are emailed through the configured SMTP settings.
 
 
 15. WEBHOOK MONITOR FEATURES PRESENT IN CODE
 
 Current route status:
-- App.tsx redirects /dashboard/webhooks to /dashboard/logs-monitoring.
-- A standalone WebhooksPage component still exists and may be re-enabled later.
+- /dashboard/webhooks opens the Webhook Manager page.
+- The sidebar includes a Webhook Manager section for admins with the webhooks permission.
 
 Frontend file:
 - src/pages/WebhooksPage.tsx
@@ -608,8 +613,10 @@ API:
 - GET /api/admin/webhooks
 
 Standalone page capabilities:
-- Summary cards for lead configs, events in 24h, failed events, and Messenger errors.
-- Webhook URL reference cards with provider, methods, purpose, verify token source, supported events, copy URL, and open URL buttons.
+- Summary cards for active URLs, events in 24h, failed events, and token sources.
+- Active webhook URL cards with provider, methods, purpose, token source, supported events, copy URL, and open URL buttons.
+- Token keys are masked by default and revealed on demand through an authenticated admin API call.
+- Each webhook URL has a View logs action that filters events for that specific URL and shows Success/Failure status.
 - Meta lead capture configuration list.
 - Messenger channel configuration list.
 - Webhook event stream with detailed JSON payload panel.
@@ -621,6 +628,7 @@ Webhook references built by backend:
 - Messenger webhook alias: CLIENT_API_BASE_URL/messenger/webhook.
 - Meta Lead Ads webhook: CLIENT_API_BASE_URL/meta/lead-capture/webhook.
 - WhatsApp Payments data endpoint: external, not a fixed Connektly route.
+- Active developer webhook endpoints from developer_webhook_endpoints.
 
 
 16. SERVER STATUS FEATURES PRESENT IN CODE
@@ -874,4 +882,3 @@ Backend and migration:
 - server.ts
 - server.js
 - supabase/admin_dashboard.sql
-

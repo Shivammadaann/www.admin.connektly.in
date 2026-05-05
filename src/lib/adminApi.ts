@@ -24,6 +24,7 @@ import type {
   WebsiteHelpArticle,
   WebsiteMediaUploadResponse,
   WebhooksResponse,
+  WebhookTokenRevealResponse,
   AdminLiveEvent,
 } from './types';
 
@@ -296,6 +297,9 @@ export const adminApi = {
   },
   getWebhooks() {
     return request<WebhooksResponse>('/webhooks', { cache: 'no-store' });
+  },
+  revealWebhookToken(webhookId: string) {
+    return request<WebhookTokenRevealResponse>(`/webhooks/${encodeURIComponent(webhookId)}/token`, { cache: 'no-store' });
   },
   getServer() {
     return request<ServerResponse>('/server', { cache: 'no-store' });

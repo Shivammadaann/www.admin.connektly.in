@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   Activity,
+  AlertTriangle,
   Bell,
   BookOpenText,
   Boxes,
@@ -11,6 +12,7 @@ import {
   Globe2,
   Inbox,
   LayoutDashboard,
+  Loader2,
   LogOut,
   Menu,
   Search,
@@ -18,6 +20,7 @@ import {
   SlidersHorizontal,
   ScrollText,
   Users,
+  Webhook,
   X,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -27,6 +30,7 @@ import type { AdminAccessSummary, AdminPermissionKey } from '../lib/types';
 import { formatShortTime, getInitials } from '../lib/format';
 import BrandMark from './BrandMark';
 import LiveEventFeed from './LiveEventFeed';
+import Modal from './Modal';
 
 type NavItem = { label: string; path: string; icon: typeof LayoutDashboard; permissions?: AdminPermissionKey[] };
 
@@ -53,6 +57,12 @@ const navSections = [
     ],
   },
   {
+    title: 'Webhook Manager',
+    items: [
+      { label: 'Webhook Manager', path: '/dashboard/webhooks', icon: Webhook, permissions: ['webhooks'] },
+    ],
+  },
+  {
     title: 'Logs & Monitoring',
     items: [
       {
@@ -75,6 +85,8 @@ export default function AdminLayout({ adminEmail, adminAccess }: AdminLayoutProp
   const { events, status, unreadCount, clearUnread } = useLiveEvents();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [feedOpen, setFeedOpen] = useState(false);
+  const [signOutDialogOpen, setSignOutDialogOpen] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const [ownerProfile, setOwnerProfile] = useState<{ fullName: string; avatarUrl: string | null } | null>(null);
   const feedRef = useRef<HTMLDivElement | null>(null);
   const displayName = ownerProfile?.fullName || adminEmail?.split('@')[0] || 'Owner';
@@ -144,9 +156,20 @@ export default function AdminLayout({ adminEmail, adminAccess }: AdminLayoutProp
     };
   }, []);
 
+  const requestSignOut = () => {
+    setMobileOpen(false);
+    setSignOutDialogOpen(true);
+  };
+
   const signOut = async () => {
-    await supabase.auth.signOut();
-    navigate('/login', { replace: true });
+    try {
+      setIsSigningOut(true);
+      await supabase.auth.signOut();
+      setSignOutDialogOpen(false);
+      navigate('/login', { replace: true });
+    } finally {
+      setIsSigningOut(false);
+    }
   };
 
   const sidebar = (
@@ -215,7 +238,7 @@ export default function AdminLayout({ adminEmail, adminAccess }: AdminLayoutProp
         </div>
         <button
           type="button"
-          onClick={signOut}
+          onClick={requestSignOut}
           className="mt-2 flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium text-gray-300 transition hover:bg-red-500/10 hover:text-red-400"
         >
           <LogOut className="h-5 w-5" />
@@ -226,7 +249,8 @@ export default function AdminLayout({ adminEmail, adminAccess }: AdminLayoutProp
   );
 
   return (
-    <div className="flex h-[100dvh] overflow-hidden bg-[#f3f4f6]">
+    <>
+      <div className="flex h-[100dvh] overflow-hidden bg-[#f3f4f6]">
       <div className="hidden md:block">{sidebar}</div>
 
       {mobileOpen ? (
@@ -320,6 +344,42 @@ export default function AdminLayout({ adminEmail, adminAccess }: AdminLayoutProp
           <Outlet />
         </main>
       </div>
-    </div>
+      </div>
+      <Modal
+        title="Confirm sign out"
+        description="Your current admin dashboard session will end."
+        isOpen={signOutDialogOpen}
+        onClose={() => {
+          if (!isSigningOut) {
+            setSignOutDialogOpen(false);
+          }
+        }}
+        maxWidthClass="max-w-md"
+      >
+        <div className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <p className="text-sm leading-6">Sign out of this admin account?</p>
+        </div>
+        <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={() => setSignOutDialogOpen(false)}
+            disabled={isSigningOut}
+            className="inline-flex items-center justify-center rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            disabled={isSigningOut}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSigningOut ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+            Sign out
+          </button>
+        </div>
+      </Modal>
+    </>
   );
 }

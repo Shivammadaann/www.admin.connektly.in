@@ -21,10 +21,20 @@ export async function getCachedSession() {
   if (!sessionPromise) {
     sessionPromise = supabase.auth
       .getSession()
-      .then(({ data, error }) => {
+      .then(async ({ data, error }) => {
         if (error) {
           throw error;
         }
+
+        if (data.session) {
+          const { error: userError } = await supabase.auth.getUser(data.session.access_token);
+          if (userError) {
+            await supabase.auth.signOut();
+            cachedSession = null;
+            return null;
+          }
+        }
+
         cachedSession = data.session;
         return data.session;
       })

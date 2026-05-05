@@ -9,7 +9,7 @@ declare global {
         options: {
           sitekey: string;
           theme?: 'light' | 'dark' | 'auto';
-          size?: 'normal' | 'flexible' | 'compact';
+          size?: 'normal' | 'flexible' | 'compact' | 'invisible';
           callback?: (token: string) => void;
           'expired-callback'?: () => void;
           'error-callback'?: () => void;
@@ -78,6 +78,7 @@ type TurnstileWidgetProps = {
   onTokenChange: (token: string | null) => void;
   resetKey?: number;
   isLocalhost?: boolean;
+  invisible?: boolean;
 };
 
 export default function TurnstileWidget({
@@ -86,6 +87,7 @@ export default function TurnstileWidget({
   onTokenChange,
   resetKey = 0,
   isLocalhost = false,
+  invisible = false,
 }: TurnstileWidgetProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<string | null>(null);
@@ -115,7 +117,7 @@ export default function TurnstileWidget({
         widgetIdRef.current = window.turnstile.render(containerRef.current, {
           sitekey: siteKey,
           theme: 'light',
-          size: 'flexible',
+          size: invisible ? 'invisible' : 'flexible',
           callback: (nextToken) => onTokenChange(nextToken),
           'expired-callback': () => onTokenChange(null),
           'error-callback': () => {
@@ -155,6 +157,10 @@ export default function TurnstileWidget({
     onTokenChange(null);
     window.turnstile.reset(widgetIdRef.current);
   }, [onTokenChange, resetKey]);
+
+  if (invisible) {
+    return <div ref={containerRef} className="pointer-events-none fixed bottom-0 right-0 h-0 w-0 overflow-hidden opacity-0" aria-hidden="true" />;
+  }
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4">

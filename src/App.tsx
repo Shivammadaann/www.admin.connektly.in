@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
-import { AlertTriangle, Loader2, LockKeyhole, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Loader2, LogIn, Mail, UserPlus } from 'lucide-react';
 import { adminApi, AdminApiError } from './lib/adminApi';
 import { clientConfig, hasSupabaseConfig, hasTurnstileSiteKey } from './lib/config';
 import { getCachedSession, supabase } from './lib/supabase';
@@ -21,6 +21,7 @@ import ClientFeatureOperationsPage from './pages/ClientFeatureOperationsPage';
 import WebsiteManagementPage from './pages/WebsiteManagementPage';
 import WebsiteLeadFormDataPage from './pages/WebsiteLeadFormDataPage';
 import PaymentsPage from './pages/PaymentsPage';
+import WebhooksPage from './pages/WebhooksPage';
 import OwnerSettingsPage from './pages/OwnerSettingsPage';
 
 function LoadingScreen() {
@@ -58,10 +59,14 @@ function SetupRequired() {
 function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [requestForm, setRequestForm] = useState({ fullName: '', email: '', phone: '' });
+  const [mode, setMode] = useState<'sign-in' | 'request'>('sign-in');
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRequesting, setIsRequesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [requestMessage, setRequestMessage] = useState<string | null>(null);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -69,7 +74,7 @@ function LoginPage() {
     setError(null);
 
     if (hasTurnstileSiteKey && !captchaToken) {
-      setError('Complete the security check before logging in.');
+      setError('Security verification is still loading. Try again in a moment.');
       setIsLoading(false);
       return;
     }
@@ -88,95 +93,190 @@ function LoginPage() {
     setIsLoading(false);
   };
 
+  const handleRequestSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setIsRequesting(true);
+    setError(null);
+    setRequestMessage(null);
+
+    try {
+      const response = await fetch(`${clientConfig.adminApiBaseUrl}/access-request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestForm),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || 'Unable to send request.');
+      }
+      setRequestMessage(payload.message || 'Request sent. The admin team will review it.');
+      setRequestForm({ fullName: '', email: '', phone: '' });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Unable to send request.');
+    } finally {
+      setIsRequesting(false);
+    }
+  };
+
   return (
-    <div className="grid min-h-screen bg-[#f3f4f6] lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-      <section className="hidden bg-[#111827] p-8 text-white lg:flex lg:flex-col">
-        <div className="flex items-center gap-3">
+    <div className="flex min-h-screen items-center justify-center bg-[#f3f4f6] px-4 py-8">
+      <div className="w-full max-w-md">
+        <div className="mb-6 flex items-center justify-center gap-3">
           <BrandMark className="h-10 w-10" />
           <div>
-            <p className="text-xl font-bold">Connektly</p>
-            <p className="text-sm text-gray-400">Owner control plane</p>
+            <p className="text-lg font-bold text-gray-950">Connektly</p>
+            <p className="text-xs font-medium text-gray-500">Admin Control Centre</p>
           </div>
         </div>
 
-        <div className="mt-auto max-w-xl">
-          <div className="inline-flex items-center gap-2 rounded-full border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-gray-300">
-            <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
-            Super admin
-          </div>
-          <h1 className="mt-6 text-5xl font-bold leading-tight tracking-tight">
-            Payments, users, webhooks, and server health in one live cockpit.
-          </h1>
-          <p className="mt-5 max-w-lg text-base leading-7 text-gray-400">
-            Built for Connektly operators who need direct visibility into every workspace and realtime client dashboard activity.
-          </p>
-        </div>
-      </section>
-
-      <section className="flex items-center justify-center p-6">
-        <form onSubmit={handleSubmit} className="w-full max-w-md rounded-[28px] border border-gray-200 bg-white p-7 shadow-sm">
-          <div className="flex items-center gap-3 lg:hidden">
-            <BrandMark className="h-9 w-9" />
-            <div>
-              <p className="text-lg font-bold text-gray-950">Connektly</p>
-              <p className="text-xs text-gray-500">Admin Control Centre</p>
-            </div>
-          </div>
-
-          <div className="mt-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#f5f3ff] text-[#5b45ff]">
-            <LockKeyhole className="h-7 w-7" />
-          </div>
-          <h2 className="mt-5 text-2xl font-bold text-gray-950">Owner sign in</h2>
-          <p className="mt-2 text-sm leading-6 text-gray-500">Use the primary owner account or an invited dashboard admin account.</p>
-
-          {error ? <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
-
-          <label className="mt-6 block">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Email</span>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none transition focus:border-[#5b45ff] focus:ring-1 focus:ring-[#5b45ff]"
-              placeholder="owner@connektly.in"
-            />
-          </label>
-
-          <label className="mt-4 block">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Password</span>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none transition focus:border-[#5b45ff] focus:ring-1 focus:ring-[#5b45ff]"
-              placeholder="Password"
-            />
-          </label>
-
+        <div className="rounded-[24px] border border-gray-200 bg-white p-6 shadow-sm sm:p-7">
           {hasTurnstileSiteKey ? (
-            <div className="mt-5">
-              <TurnstileWidget
-                siteKey={clientConfig.turnstile.siteKey}
-                isLocalhost={clientConfig.turnstile.isLocalhost}
-                token={captchaToken}
-                onTokenChange={setCaptchaToken}
-                resetKey={captchaResetKey}
-              />
-            </div>
+            <TurnstileWidget
+              siteKey={clientConfig.turnstile.siteKey}
+              isLocalhost={clientConfig.turnstile.isLocalhost}
+              token={captchaToken}
+              onTokenChange={setCaptchaToken}
+              resetKey={captchaResetKey}
+              invisible
+            />
           ) : null}
 
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#5b45ff] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#4c38e0] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Sign in
-          </button>
-        </form>
-      </section>
+          {mode === 'sign-in' ? (
+            <form onSubmit={handleSubmit}>
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#f5f3ff] text-[#5b45ff]">
+                <LogIn className="h-5 w-5" />
+              </div>
+              <h1 className="mt-5 text-2xl font-bold tracking-tight text-gray-950">Admin sign in</h1>
+              <p className="mt-2 text-sm leading-6 text-gray-500">Use your invited admin account to continue.</p>
+
+              {error ? <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
+
+              <label className="mt-6 block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">Email</span>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-950 outline-none transition placeholder:text-gray-400 focus:border-[#5b45ff] focus:ring-1 focus:ring-[#5b45ff]"
+                  placeholder="admin@connektly.in"
+                  autoComplete="email"
+                />
+              </label>
+
+              <label className="mt-4 block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">Password</span>
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-950 outline-none transition placeholder:text-gray-400 focus:border-[#5b45ff] focus:ring-1 focus:ring-[#5b45ff]"
+                  placeholder="Password"
+                  autoComplete="current-password"
+                />
+              </label>
+
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#111827] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#1f2937] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
+                Sign in
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('request');
+                  setError(null);
+                  setRequestMessage(null);
+                }}
+                className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 hover:text-gray-950"
+              >
+                <UserPlus className="h-4 w-4" />
+                Request to Join Admin Control Panel
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleRequestSubmit}>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('sign-in');
+                  setError(null);
+                  setRequestMessage(null);
+                }}
+                className="inline-flex items-center gap-2 text-sm font-semibold text-gray-500 transition hover:text-gray-950"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back to sign in
+              </button>
+              <div className="mt-5 flex h-11 w-11 items-center justify-center rounded-2xl bg-[#eef2ff] text-[#5b45ff]">
+                <Mail className="h-5 w-5" />
+              </div>
+              <h1 className="mt-5 text-2xl font-bold tracking-tight text-gray-950">Request admin access</h1>
+              <p className="mt-2 text-sm leading-6 text-gray-500">Send your details to the Connektly admin team for review.</p>
+
+              {error ? <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
+              {requestMessage ? <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{requestMessage}</div> : null}
+
+              <label className="mt-6 block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">Name</span>
+                <input
+                  type="text"
+                  required
+                  value={requestForm.fullName}
+                  onChange={(event) => setRequestForm((current) => ({ ...current, fullName: event.target.value }))}
+                  className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-950 outline-none transition placeholder:text-gray-400 focus:border-[#5b45ff] focus:ring-1 focus:ring-[#5b45ff]"
+                  placeholder="Full name"
+                  autoComplete="name"
+                />
+              </label>
+
+              <label className="mt-4 block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">Email</span>
+                <input
+                  type="email"
+                  required
+                  value={requestForm.email}
+                  onChange={(event) => setRequestForm((current) => ({ ...current, email: event.target.value }))}
+                  className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-950 outline-none transition placeholder:text-gray-400 focus:border-[#5b45ff] focus:ring-1 focus:ring-[#5b45ff]"
+                  placeholder="you@company.com"
+                  autoComplete="email"
+                />
+              </label>
+
+              <label className="mt-4 block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">Number</span>
+                <input
+                  type="tel"
+                  required
+                  value={requestForm.phone}
+                  onChange={(event) => setRequestForm((current) => ({ ...current, phone: event.target.value }))}
+                  className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-950 outline-none transition placeholder:text-gray-400 focus:border-[#5b45ff] focus:ring-1 focus:ring-[#5b45ff]"
+                  placeholder="+91 98765 43210"
+                  autoComplete="tel"
+                />
+              </label>
+
+              <button
+                type="submit"
+                disabled={isRequesting}
+                className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#111827] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#1f2937] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isRequesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+                Submit request
+              </button>
+            </form>
+          )}
+        </div>
+
+        <p className="mt-5 text-center text-xs leading-5 text-gray-500">
+          Admin access is invitation-only. No public sign up is available.
+        </p>
+      </div>
     </div>
   );
 }
@@ -193,6 +293,7 @@ function ProtectedAdmin({
   const [adminEmail, setAdminEmail] = useState<string | null>(null);
   const [adminAccess, setAdminAccess] = useState<AdminAccessSummary | null>(null);
   const [isChecking, setIsChecking] = useState(true);
+  const [sessionRejected, setSessionRejected] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -202,6 +303,7 @@ function ProtectedAdmin({
       if (!sessionUserId) {
         setAdminEmail(null);
         setAdminAccess(null);
+        setSessionRejected(false);
         setError(null);
         setIsChecking(false);
         return;
@@ -214,8 +316,20 @@ function ProtectedAdmin({
         if (!cancelled) {
           setAdminEmail(response.admin.email);
           setAdminAccess(response.admin.access);
+          setSessionRejected(false);
         }
       } catch (error) {
+        if (error instanceof AdminApiError && error.status === 401) {
+          await supabase.auth.signOut();
+          if (!cancelled) {
+            setAdminEmail(null);
+            setAdminAccess(null);
+            setSessionRejected(true);
+            setError(null);
+          }
+          return;
+        }
+
         if (!cancelled) {
           const message =
             error instanceof AdminApiError || error instanceof Error
@@ -237,6 +351,10 @@ function ProtectedAdmin({
   }, [sessionUserId]);
 
   if (!session) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (sessionRejected) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
@@ -339,7 +457,7 @@ export default function App() {
           <Route path="website" element={<WebsiteManagementPage />} />
           <Route path="website-leads" element={<WebsiteLeadFormDataPage />} />
           <Route path="payments" element={<PaymentsPage />} />
-          <Route path="webhooks" element={<Navigate to="/dashboard/logs-monitoring" replace />} />
+          <Route path="webhooks" element={<WebhooksPage />} />
           <Route path="server" element={<Navigate to="/dashboard/logs-monitoring" replace />} />
           <Route path="audit" element={<Navigate to="/dashboard/logs-monitoring" replace />} />
           <Route path="settings" element={<OwnerSettingsPage />} />

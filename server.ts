@@ -6,6 +6,7 @@ import process from 'node:process';
 import crypto from 'node:crypto';
 import dotenv from 'dotenv';
 import { createClient, type User } from '@supabase/supabase-js';
+import nodemailer from 'nodemailer';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -54,6 +55,8 @@ type LivePayload = {
   source: string;
   eventType: string;
   table?: string;
+  webhookId?: string;
+  webhookIds?: string[];
   userId?: string | null;
   title: string;
   description?: string;
@@ -105,10 +108,17 @@ const primaryOwnerEmail = (process.env.PRIMARY_OWNER_EMAIL || 'admin@connektly.i
 const adminInviteRedirectUrl = process.env.ADMIN_INVITE_REDIRECT_URL || '';
 const graphVersion = process.env.META_GRAPH_VERSION || 'v24.0';
 const metaWebhookVerifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN || '';
+const messengerWebhookVerifyToken = process.env.MESSENGER_WEBHOOK_VERIFY_TOKEN || '';
 const tokenEncryptionSecret = process.env.META_TOKEN_ENCRYPTION_KEY || '';
 const tokenEncryptionKey = tokenEncryptionSecret ? crypto.createHash('sha256').update(tokenEncryptionSecret).digest() : null;
 const razorpayKeyId = process.env.RAZORPAY_KEY_ID || '';
 const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET || '';
+const smtpHost = process.env.SMTP_HOST || '';
+const smtpPort = Number(process.env.SMTP_PORT || 587);
+const smtpUser = process.env.SMTP_USER || '';
+const smtpPass = process.env.SMTP_PASS || '';
+const smtpFrom = process.env.SMTP_FROM || smtpUser || 'Connektly Admin <no-reply@connektly.in>';
+const adminAccessRequestEmail = process.env.ADMIN_ACCESS_REQUEST_EMAIL || 'Admin@connektly.in';
 
 const hasRequiredServerConfig = Boolean(supabaseUrl && supabaseAnonKey && supabaseServiceRoleKey);
 const anonSupabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseAnonKey || 'placeholder-key');
@@ -137,6 +147,39 @@ app.use((req, res, next) => {
     return;
   }
   next();
+});
+
+app.post('/api/admin/access-request', async (req, res) => {
+  try {
+    const fullName = normalizeString(req.body.fullName);
+    const email = normalizeEmail(req.body.email);
+    const phone = normalizeString(req.body.phone);
+
+    if (!fullName) {
+      sendError(res, 400, new Error('Name is required.'));
+      return;
+    }
+    if (!email) {
+      sendError(res, 400, new Error('Enter a valid email address.'));
+      return;
+    }
+    if (!phone) {
+      sendError(res, 400, new Error('Number is required.'));
+      return;
+    }
+
+    await sendAdminAccessRequestEmail({
+      fullName,
+      email,
+      phone,
+      ipAddress: normalizeString(req.headers['x-forwarded-for']) || req.socket.remoteAddress || null,
+      userAgent: normalizeString(req.headers['user-agent']) || null,
+    });
+
+    res.status(201).json({ ok: true, message: 'Admin access request sent.' });
+  } catch (error) {
+    sendError(res, 500, error);
+  }
 });
 
 function nowIso() {
@@ -232,6 +275,66 @@ function decryptAccessToken(value: unknown) {
 function sendError(res: Response, status: number, error: unknown) {
   const message = error instanceof Error ? error.message : String(error || 'Unexpected error');
   res.status(status).json({ error: message });
+}
+
+function escapeHtml(value: unknown) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function sendAdminAccessRequestEmail(payload: {
+  fullName: string;
+  email: string;
+  phone: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+}) {
+  if (!smtpHost) {
+    throw new Error('SMTP_HOST is not configured for admin access request emails.');
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpPort === 465,
+    auth: smtpUser && smtpPass ? { user: smtpUser, pass: smtpPass } : undefined,
+  });
+  const submittedAt = nowIso();
+  const plainText = [
+    'New Admin Control Panel access request',
+    '',
+    `Name: ${payload.fullName}`,
+    `Email: ${payload.email}`,
+    `Number: ${payload.phone}`,
+    `Submitted: ${submittedAt}`,
+    `IP: ${payload.ipAddress || 'Not available'}`,
+    `User agent: ${payload.userAgent || 'Not available'}`,
+  ].join('\n');
+
+  await transporter.sendMail({
+    from: smtpFrom,
+    to: adminAccessRequestEmail,
+    replyTo: payload.email,
+    subject: `Admin access request from ${payload.fullName}`,
+    text: plainText,
+    html: `
+      <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
+        <h2 style="margin: 0 0 16px;">New Admin Control Panel access request</h2>
+        <table cellpadding="8" cellspacing="0" style="border-collapse: collapse;">
+          <tr><td><strong>Name</strong></td><td>${escapeHtml(payload.fullName)}</td></tr>
+          <tr><td><strong>Email</strong></td><td><a href="mailto:${escapeHtml(payload.email)}">${escapeHtml(payload.email)}</a></td></tr>
+          <tr><td><strong>Number</strong></td><td>${escapeHtml(payload.phone)}</td></tr>
+          <tr><td><strong>Submitted</strong></td><td>${escapeHtml(submittedAt)}</td></tr>
+          <tr><td><strong>IP</strong></td><td>${escapeHtml(payload.ipAddress || 'Not available')}</td></tr>
+          <tr><td><strong>User agent</strong></td><td>${escapeHtml(payload.userAgent || 'Not available')}</td></tr>
+        </table>
+      </div>
+    `,
+  });
 }
 
 function ensureServerConfig() {
@@ -2300,12 +2403,14 @@ function mapLivePayload(table: string, payload: { eventType: string; new?: unkno
   const row = (isRecord(payload.new) ? payload.new : isRecord(payload.old) ? payload.old : {}) as JsonRecord;
   const id = normalizeString(row.id) || `${table}:${payload.eventType}:${Date.now()}`;
   const userId = normalizeString(row.user_id) || normalizeString(row.workspace_owner_user_id);
+  const webhookIds = inferWebhookIds(table, row);
   return {
     id: `${table}:${payload.eventType}:${id}:${Date.now()}`,
     occurredAt: normalizeString(row.updated_at) || normalizeString(row.created_at) || nowIso(),
     source: 'supabase',
     eventType: payload.eventType,
     table,
+    ...(webhookIds.length > 0 ? { webhookId: webhookIds[0], webhookIds } : {}),
     userId,
     title: getEventTitle(table, row, payload.eventType),
     description:
@@ -2574,10 +2679,377 @@ function buildClientApiUrl(pathname: string) {
   return `${clientApiBaseUrl.replace(/\/$/, '')}${pathname}`;
 }
 
-function buildWebhookReferences() {
-  const configured = Boolean(clientApiBaseUrl);
+type WebhookTokenScope = 'environment' | 'workspace' | 'endpoint' | 'external';
+type WebhookStatus = 'configured' | 'needs_base_url' | 'external';
 
-  return [
+type WebhookTokenPreview = {
+  source: string;
+  scope: WebhookTokenScope;
+  hasToken: boolean;
+  maskedValue: string | null;
+  count: number;
+};
+
+type WebhookReference = {
+  id: string;
+  name: string;
+  url: string | null;
+  methods: string[];
+  provider: string;
+  purpose: string;
+  verifyTokenEnv?: string;
+  token: WebhookTokenPreview;
+  events: string[];
+  status: WebhookStatus;
+  notes?: string;
+  eventCount: number;
+  successCount: number;
+  failureCount: number;
+  lastEventAt: string | null;
+};
+
+type WebhookTokenValue = {
+  id: string;
+  label: string;
+  value: string;
+  maskedValue: string;
+  source: string;
+  userId: string | null;
+  updatedAt: string | null;
+};
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return [...new Set(values.map((value) => normalizeString(value)).filter((value): value is string => Boolean(value)))];
+}
+
+function normalizeWebhookList(value: unknown, fallback: string[] = []) {
+  if (Array.isArray(value)) {
+    return uniqueStrings(value.map((item) => normalizeString(item)));
+  }
+
+  const text = normalizeString(value);
+  if (!text) {
+    return fallback;
+  }
+
+  return uniqueStrings(text.split(',').map((item) => item.trim()));
+}
+
+function isActiveWebhookRow(row: JsonRecord) {
+  const status = String(row.status || row.state || row.enabled_status || '').trim().toLowerCase();
+  if (!status) {
+    return true;
+  }
+
+  if (/(disabled|inactive|deleted|archived|paused|draft|error|failed)/.test(status)) {
+    return false;
+  }
+
+  return /(active|enabled|connected|configured|subscribed|live)/.test(status);
+}
+
+function tokenPreview(source: string, scope: WebhookTokenScope, values: unknown[]): WebhookTokenPreview {
+  const tokens = values.map((value) => normalizeString(value)).filter((value): value is string => Boolean(value));
+  const maskedValue = tokens.length === 1 ? maskSecret(tokens[0]) : tokens.length > 1 ? `${tokens.length} tokens` : null;
+  return {
+    source,
+    scope,
+    hasToken: tokens.length > 0,
+    maskedValue,
+    count: tokens.length,
+  };
+}
+
+function noWebhookToken(source = 'Not required'): WebhookTokenPreview {
+  return {
+    source,
+    scope: 'external',
+    hasToken: false,
+    maskedValue: null,
+    count: 0,
+  };
+}
+
+function activeLeadConfigTokenValues(leadConfigs: JsonRecord[]) {
+  return leadConfigs
+    .filter((row) => isActiveWebhookRow(row))
+    .map((row) => normalizeString(row.verify_token))
+    .filter((value): value is string => Boolean(value));
+}
+
+function webhookEndpointUrl(row: JsonRecord) {
+  return (
+    normalizeString(row.url) ||
+    normalizeString(row.endpoint_url) ||
+    normalizeString(row.callback_url) ||
+    normalizeString(row.target_url) ||
+    normalizeString(row.webhook_url) ||
+    normalizeString(row.delivery_url)
+  );
+}
+
+function webhookEndpointSecret(row: JsonRecord) {
+  return (
+    normalizeString(row.signing_secret) ||
+    normalizeString(row.webhook_secret) ||
+    normalizeString(row.secret) ||
+    normalizeString(row.token) ||
+    normalizeString(row.verify_token)
+  );
+}
+
+function webhookEndpointMethods(row: JsonRecord) {
+  const methods = normalizeWebhookList(row.methods || row.method, []);
+  return methods.length > 0 ? methods.map((method) => method.toUpperCase()) : ['POST'];
+}
+
+function webhookEndpointEvents(row: JsonRecord) {
+  return normalizeWebhookList(row.events || row.event_types || row.subscribed_events || row.topics, ['workspace events']);
+}
+
+function developerWebhookReference(row: JsonRecord, index: number): WebhookReference | null {
+  const url = webhookEndpointUrl(row);
+  if (!url || !isActiveWebhookRow(row)) {
+    return null;
+  }
+
+  const actualRowId = normalizeString(row.id);
+  const rowId =
+    actualRowId ||
+    crypto.createHash('sha1').update(`${url}:${normalizeString(row.name) || normalizeString(row.label) || index}`).digest('hex').slice(0, 16);
+  const secret = webhookEndpointSecret(row);
+  return {
+    id: `developer:${rowId}`,
+    name: normalizeString(row.name) || normalizeString(row.label) || `Developer webhook ${index + 1}`,
+    url,
+    methods: webhookEndpointMethods(row),
+    provider: normalizeString(row.provider) || 'Developer tools',
+    purpose:
+      normalizeString(row.description) ||
+      normalizeString(row.purpose) ||
+      'Customer-configured developer webhook endpoint for workspace events.',
+    verifyTokenEnv: secret ? 'Stored signing secret' : 'Not configured',
+    token: tokenPreview('developer_webhook_endpoints signing secret', 'endpoint', actualRowId ? [secret] : []),
+    events: webhookEndpointEvents(row),
+    status: 'configured',
+    notes: normalizeString(row.notes) || 'Active developer webhook endpoint.',
+    eventCount: 0,
+    successCount: 0,
+    failureCount: 0,
+    lastEventAt: null,
+  };
+}
+
+function inferConversationWebhookIds(row: JsonRecord) {
+  const haystack = [
+    row.channel,
+    row.channel_type,
+    row.provider,
+    row.platform,
+    row.source,
+    row.integration,
+    row.message_channel,
+    row.page_id,
+    row.page_name,
+    row.facebook_page_id,
+    row.phone_number_id,
+    row.waba_id,
+    row.wa_id,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (haystack.includes('messenger') || haystack.includes('facebook') || haystack.includes('page_id')) {
+    return ['messenger-canonical', 'messenger-alias'];
+  }
+
+  if (haystack.includes('whatsapp') || haystack.includes('waba') || haystack.includes('wa_') || haystack.includes('phone_number')) {
+    return ['whatsapp-cloud-api'];
+  }
+
+  return ['whatsapp-cloud-api'];
+}
+
+function inferWebhookIds(table?: string, row: JsonRecord = {}) {
+  if (table === 'meta_lead_capture_events' || table === 'meta_lead_capture_configs') {
+    return ['meta-lead-capture'];
+  }
+  if (table === 'whatsapp_payment_configuration_events') {
+    return ['whatsapp-cloud-api', 'whatsapp-payments-data-endpoint'];
+  }
+  if (table === 'call_sessions' || table === 'call_logs') {
+    return ['whatsapp-cloud-api'];
+  }
+  if (table === 'conversation_messages' || table === 'conversation_threads') {
+    return inferConversationWebhookIds(row);
+  }
+  if (table === 'messenger_channels') {
+    return ['messenger-canonical', 'messenger-alias'];
+  }
+  if (table === 'developer_webhook_endpoints') {
+    const id = normalizeString(row.id);
+    return id ? [`developer:${id}`] : [];
+  }
+  return [];
+}
+
+function liveEventWebhookIds(event: LivePayload) {
+  const explicit = uniqueStrings([event.webhookId, ...(event.webhookIds || [])]);
+  if (explicit.length > 0) {
+    return explicit;
+  }
+
+  const row = isRecord(event.payload) ? event.payload : {};
+  return inferWebhookIds(event.table, row);
+}
+
+function enrichWebhookEvent(event: LivePayload): LivePayload {
+  const webhookIds = liveEventWebhookIds(event);
+  if (webhookIds.length === 0 || event.webhookIds?.length) {
+    return event;
+  }
+  return {
+    ...event,
+    webhookId: webhookIds[0],
+    webhookIds,
+  };
+}
+
+function isFailedWebhookEvent(event: LivePayload) {
+  const text = [event.severity, event.status, event.title, event.description]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return event.severity === 'critical' || /fail|error|timeout|declin|past_due|disconnect|halted/.test(text);
+}
+
+function withWebhookStats(webhook: WebhookReference, events: LivePayload[]): WebhookReference {
+  const relatedEvents = events.filter((event) => liveEventWebhookIds(event).includes(webhook.id));
+  const failures = relatedEvents.filter(isFailedWebhookEvent).length;
+  const lastEventAt = relatedEvents
+    .map((event) => event.occurredAt)
+    .sort((left, right) => Date.parse(right) - Date.parse(left))[0] || null;
+
+  return {
+    ...webhook,
+    eventCount: relatedEvents.length,
+    successCount: relatedEvents.length - failures,
+    failureCount: failures,
+    lastEventAt,
+  };
+}
+
+function webhookTokenValue(args: {
+  id: string;
+  label: string;
+  value: unknown;
+  source: string;
+  userId?: string | null;
+  updatedAt?: string | null;
+}): WebhookTokenValue | null {
+  const value = normalizeString(args.value);
+  if (!value) {
+    return null;
+  }
+
+  let revealedValue = value;
+  try {
+    revealedValue = decryptSecretValue(value);
+  } catch {
+    revealedValue = value;
+  }
+
+  return {
+    id: args.id,
+    label: args.label,
+    value: revealedValue,
+    maskedValue: maskSecret(revealedValue),
+    source: args.source,
+    userId: args.userId || null,
+    updatedAt: args.updatedAt || null,
+  };
+}
+
+async function loadWebhookTokenValues(webhookId: string) {
+  if (webhookId === 'whatsapp-cloud-api') {
+    return [
+      webhookTokenValue({
+        id: 'META_WEBHOOK_VERIFY_TOKEN',
+        label: 'WhatsApp Cloud API verify token',
+        value: metaWebhookVerifyToken,
+        source: 'META_WEBHOOK_VERIFY_TOKEN',
+      }),
+    ].filter((value): value is WebhookTokenValue => Boolean(value));
+  }
+
+  if (webhookId === 'messenger-canonical' || webhookId === 'messenger-alias') {
+    return [
+      webhookTokenValue({
+        id: 'MESSENGER_WEBHOOK_VERIFY_TOKEN',
+        label: 'Messenger verify token',
+        value: messengerWebhookVerifyToken,
+        source: 'MESSENGER_WEBHOOK_VERIFY_TOKEN',
+      }),
+    ].filter((value): value is WebhookTokenValue => Boolean(value));
+  }
+
+  if (webhookId === 'meta-lead-capture') {
+    const configs = await safeSelect('meta_lead_capture_configs', '*', (query: any) =>
+      query.order('updated_at', { ascending: false }).limit(500),
+    );
+    return configs.rows
+      .filter((row) => isActiveWebhookRow(row))
+      .map((row, index) =>
+        webhookTokenValue({
+          id: normalizeString(row.id) || `meta-lead-token:${index}`,
+          label:
+            normalizeString(row.page_name) ||
+            normalizeString(row.form_name) ||
+            normalizeString(row.user_id) ||
+            `Lead capture workspace ${index + 1}`,
+          value: row.verify_token,
+          source: 'meta_lead_capture_configs.verify_token',
+          userId: normalizeString(row.user_id),
+          updatedAt: normalizeString(row.updated_at) || normalizeString(row.created_at),
+        }),
+      )
+      .filter((value): value is WebhookTokenValue => Boolean(value));
+  }
+
+  if (webhookId.startsWith('developer:')) {
+    const endpointId = webhookId.slice('developer:'.length);
+    const endpoint = await safeSelect('developer_webhook_endpoints', '*', (query: any) => query.eq('id', endpointId).limit(1));
+    const row = endpoint.rows[0];
+    if (!row) {
+      return [];
+    }
+    return [
+      webhookTokenValue({
+        id: endpointId,
+        label: normalizeString(row.name) || normalizeString(row.label) || 'Developer webhook signing secret',
+        value: webhookEndpointSecret(row),
+        source: 'developer_webhook_endpoints signing secret',
+        userId: rowOwnerUserId(row),
+        updatedAt: normalizeString(row.updated_at) || normalizeString(row.created_at),
+      }),
+    ].filter((value): value is WebhookTokenValue => Boolean(value));
+  }
+
+  return [];
+}
+
+function buildWebhookReferences(args: {
+  leadConfigs?: JsonRecord[];
+  developerWebhookEndpoints?: JsonRecord[];
+  events?: LivePayload[];
+} = {}) {
+  const configured = Boolean(clientApiBaseUrl);
+  const leadConfigs = args.leadConfigs || [];
+  const leadTokenValues = activeLeadConfigTokenValues(leadConfigs);
+  const events = args.events || [];
+
+  const references: WebhookReference[] = [
     {
       id: 'whatsapp-cloud-api',
       name: 'WhatsApp Cloud API webhook',
@@ -2593,8 +3065,13 @@ function buildWebhookReferences() {
         'calls',
         'payment_configuration_update',
       ],
+      token: tokenPreview('META_WEBHOOK_VERIFY_TOKEN', 'environment', [metaWebhookVerifyToken]),
       status: configured ? 'configured' : 'needs_base_url',
       notes: 'Use this as the callback URL for WhatsApp Business Account webhooks.',
+      eventCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      lastEventAt: null,
     },
     {
       id: 'messenger-canonical',
@@ -2612,8 +3089,13 @@ function buildWebhookReferences() {
         'message_deliveries',
         'message_echoes',
       ],
+      token: tokenPreview('MESSENGER_WEBHOOK_VERIFY_TOKEN', 'environment', [messengerWebhookVerifyToken]),
       status: configured ? 'configured' : 'needs_base_url',
       notes: 'Preferred Messenger callback URL.',
+      eventCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      lastEventAt: null,
     },
     {
       id: 'messenger-alias',
@@ -2631,8 +3113,13 @@ function buildWebhookReferences() {
         'message_deliveries',
         'message_echoes',
       ],
+      token: tokenPreview('MESSENGER_WEBHOOK_VERIFY_TOKEN', 'environment', [messengerWebhookVerifyToken]),
       status: configured ? 'configured' : 'needs_base_url',
       notes: 'Keep available for older app configuration or manual Meta setup.',
+      eventCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      lastEventAt: null,
     },
     {
       id: 'meta-lead-capture',
@@ -2648,8 +3135,13 @@ function buildWebhookReferences() {
         'page lead events',
         'form lead events',
       ],
+      token: tokenPreview('meta_lead_capture_configs.verify_token', 'workspace', leadTokenValues),
       status: configured ? 'configured' : 'needs_base_url',
       notes: 'Used by the Meta Lead Capture integration.',
+      eventCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      lastEventAt: null,
     },
     {
       id: 'whatsapp-payments-data-endpoint',
@@ -2663,11 +3155,22 @@ function buildWebhookReferences() {
         'payment data exchange',
         'provider order/payment callback',
       ],
+      token: noWebhookToken('Provider-owned payment endpoint secret'),
       status: 'external',
       notes:
         'Manage stored payment configuration URLs from WhatsApp Payments setup; webhook update events still arrive through the WhatsApp Cloud API webhook above.',
+      eventCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      lastEventAt: null,
     },
-  ] as const;
+  ];
+
+  const developerReferences = (args.developerWebhookEndpoints || [])
+    .map((row, index) => developerWebhookReference(row, index))
+    .filter((webhook): webhook is WebhookReference => Boolean(webhook));
+
+  return [...references, ...developerReferences].map((webhook) => withWebhookStats(webhook, events));
 }
 
 function buildOverview(core: Awaited<ReturnType<typeof loadCoreData>>, authUsers: User[], health: ReturnType<typeof summarizeHealth>) {
@@ -5407,7 +5910,7 @@ app.get('/api/admin/payments', requireAdmin, requireAdminPermission('payments'),
 
 app.get('/api/admin/webhooks', requireAdmin, requireAdminPermission('webhooks'), async (_req, res) => {
   try {
-    const [leadConfigs, leadEvents, paymentEvents, messengerChannels, messages, calls] = await Promise.all([
+    const [leadConfigs, leadEvents, paymentEvents, messengerChannels, messages, calls, developerWebhookEndpoints] = await Promise.all([
       safeSelect('meta_lead_capture_configs', '*', (query: any) => query.order('updated_at', { ascending: false }).limit(200)),
       safeSelect('meta_lead_capture_events', '*', (query: any) => query.order('created_at', { ascending: false }).limit(300)),
       safeSelect('whatsapp_payment_configuration_events', '*', (query: any) =>
@@ -5416,32 +5919,65 @@ app.get('/api/admin/webhooks', requireAdmin, requireAdminPermission('webhooks'),
       safeSelect('messenger_channels', '*', (query: any) => query.order('updated_at', { ascending: false }).limit(200)),
       safeSelect('conversation_messages', '*', (query: any) => query.order('created_at', { ascending: false }).limit(200)),
       safeSelect('call_sessions', '*', (query: any) => query.order('updated_at', { ascending: false }).limit(200)),
+      safeSelect('developer_webhook_endpoints', '*', (query: any) => query.order('updated_at', { ascending: false }).limit(500)),
     ]);
 
     const events = [
       ...leadEvents.rows.map((row) => mapLivePayload('meta_lead_capture_events', { eventType: 'INSERT', new: row })),
       ...paymentEvents.rows.map((row) => mapLivePayload('whatsapp_payment_configuration_events', { eventType: 'INSERT', new: row })),
+      ...messengerChannels.rows.map((row) => mapLivePayload('messenger_channels', { eventType: 'UPDATE', new: row })),
+      ...developerWebhookEndpoints.rows.map((row) => mapLivePayload('developer_webhook_endpoints', { eventType: 'UPDATE', new: row })),
       ...messages.rows.map((row) => mapLivePayload('conversation_messages', { eventType: 'INSERT', new: row })),
       ...calls.rows.map((row) => mapLivePayload('call_sessions', { eventType: 'UPDATE', new: row })),
-      ...recentLiveEvents,
+      ...recentLiveEvents.map(enrichWebhookEvent),
     ]
       .sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt))
       .slice(0, 400);
+    const webhookUrls = buildWebhookReferences({
+      leadConfigs: leadConfigs.rows,
+      developerWebhookEndpoints: developerWebhookEndpoints.rows,
+      events,
+    });
+    const activeWebhookUrls = webhookUrls.filter((webhook) => Boolean(webhook.url) && webhook.status === 'configured');
 
     res.json({
       summary: {
         leadConfigs: leadConfigs.rows.length,
         activeLeadConfigs: leadConfigs.rows.filter((row) => String(row.status || '').toLowerCase() === 'active').length,
+        activeWebhookUrls: activeWebhookUrls.length,
         messengerWebhookErrors: messengerChannels.rows.filter((row) => Boolean(row.webhook_last_error)).length,
         events24h: events.filter((event) => isRecent(event.occurredAt, 24)).length,
-        failedEvents: events.filter((event) => event.severity === 'critical').length,
+        failedEvents: events.filter(isFailedWebhookEvent).length,
       },
       configs: {
         leadCapture: leadConfigs.rows,
         messenger: messengerChannels.rows,
       },
-      webhookUrls: buildWebhookReferences(),
+      webhookUrls,
       events,
+      generatedAt: nowIso(),
+    });
+  } catch (error) {
+    sendError(res, 500, error);
+  }
+});
+
+app.get('/api/admin/webhooks/:webhookId/token', requireAdmin, requireAdminPermission('webhooks'), async (req: AdminRequest, res) => {
+  try {
+    const webhookId = normalizeString(req.params.webhookId);
+    if (!webhookId) {
+      throw new Error('Webhook id is required.');
+    }
+
+    const tokens = await loadWebhookTokenValues(webhookId);
+    await recordAdminAudit(req.admin, 'REVEAL_WEBHOOK_TOKEN', null, {
+      webhookId,
+      tokenCount: tokens.length,
+    });
+
+    res.json({
+      webhookId,
+      tokens,
       generatedAt: nowIso(),
     });
   } catch (error) {
