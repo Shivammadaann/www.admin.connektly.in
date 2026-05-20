@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { CreditCard, IndianRupee, Loader2, ReceiptText, RefreshCcw, TrendingUp } from 'lucide-react';
 import { adminApi } from '../lib/adminApi';
 import type { PaymentsResponse } from '../lib/types';
-import { formatDateTime, formatNumber, labelize } from '../lib/format';
+import { formatCurrency, formatDateTime, formatNumber, labelize } from '../lib/format';
 import MetricCard from '../components/MetricCard';
 import PageHeader from '../components/PageHeader';
 import Panel from '../components/Panel';
@@ -12,37 +12,87 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
+function textValue(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function paymentDate(value: unknown) {
+  return value ? formatDateTime(value) : 'Not available';
+}
+
+function cardBrandLabel(value: string) {
+  const normalized = value.toLowerCase();
+  if (normalized === 'visa') return 'Visa';
+  if (normalized === 'mastercard' || normalized === 'master_card') return 'MasterCard';
+  if (normalized === 'rupay') return 'RuPay';
+  if (normalized === 'amex' || normalized === 'american express') return 'Amex';
+  return value ? labelize(value) : '';
+}
+
 function paymentMethodDetail(profile: Record<string, unknown>) {
   const method = asRecord(profile.payment_method);
-  const label = String(method.label || 'Not available');
-  const cardLast4 = method.cardLast4 ? String(method.cardLast4) : '';
-  const upiVpa = method.upiVpa ? String(method.upiVpa) : '';
-  const paymentId = method.paymentId ? String(method.paymentId) : '';
-  const error = method.error ? String(method.error) : '';
+  const methodKey = textValue(method.method).toLowerCase();
+  const label = textValue(method.label) || 'Not available';
+  const cardLast4 = textValue(method.cardLast4);
+  const cardNetwork = textValue(method.cardNetwork);
+  const cardType = textValue(method.cardType);
+  const upiVpa = textValue(method.upiVpa);
+  const paymentId = textValue(method.paymentId);
+  const invoiceId = textValue(method.invoiceId);
+  const error = textValue(method.error);
+  const currency = textValue(method.currency) || 'INR';
+  const amountPaid = Number(method.amountPaid || 0);
+  const mandateEnabled = method.mandateEnabled === true;
+  const mandateStatus = textValue(method.mandateStatus) || (mandateEnabled ? 'enabled' : 'not_enabled');
+  const tokenId = textValue(method.tokenId);
 
   if (cardLast4) {
     return {
-      label,
-      detail: `Card ending ${cardLast4}`,
-      subDetail: paymentId || error,
+      methodType: 'Card',
+      label: [cardBrandLabel(cardNetwork), cardType ? labelize(cardType) : 'Card'].filter(Boolean).join(' '),
+      detail: `Ending ${cardLast4}`,
+      subDetail: paymentId || invoiceId || error,
       status: method.status || 'card',
+      amountPaid,
+      currency,
+      paymentDate: method.paymentDate,
+      nextDueDate: method.nextDueDate,
+      mandateEnabled,
+      mandateStatus,
+      tokenId,
     };
   }
 
-  if (String(method.method || '').toLowerCase() === 'upi') {
+  if (methodKey === 'upi') {
     return {
+      methodType: 'UPI',
       label: 'UPI',
       detail: upiVpa || 'UPI mandate',
-      subDetail: paymentId || error,
+      subDetail: paymentId || invoiceId || error,
       status: method.status || 'upi',
+      amountPaid,
+      currency,
+      paymentDate: method.paymentDate,
+      nextDueDate: method.nextDueDate,
+      mandateEnabled,
+      mandateStatus,
+      tokenId,
     };
   }
 
   return {
+    methodType: label,
     label,
     detail: paymentId || error || 'No payment method found',
-    subDetail: '',
+    subDetail: invoiceId,
     status: method.status || method.method || 'unknown',
+    amountPaid,
+    currency,
+    paymentDate: method.paymentDate,
+    nextDueDate: method.nextDueDate,
+    mandateEnabled,
+    mandateStatus,
+    tokenId,
   };
 }
 
@@ -138,10 +188,12 @@ export default function PaymentsPage() {
                   <thead className="sticky top-0 z-10 bg-white">
                     <tr className="border-b border-gray-100 text-xs uppercase tracking-[0.16em] text-gray-500">
                       <th className="pb-3 pr-4 font-semibold">Workspace</th>
-                      <th className="pb-3 pr-4 font-semibold">Plan</th>
-                      <th className="pb-3 pr-4 font-semibold">Status</th>
-                      <th className="pb-3 pr-4 font-semibold">Cycle</th>
+                      <th className="pb-3 pr-4 font-semibold">Plan & Status</th>
                       <th className="pb-3 pr-4 font-semibold">Payment Method</th>
+                      <th className="pb-3 pr-4 font-semibold">Amount Paid</th>
+                      <th className="pb-3 pr-4 font-semibold">Payment Date</th>
+                      <th className="pb-3 pr-4 font-semibold">Next Due</th>
+                      <th className="pb-3 pr-4 font-semibold">Mandate</th>
                       <th className="pb-3 font-semibold">Razorpay</th>
                     </tr>
                   </thead>
@@ -154,19 +206,37 @@ export default function PaymentsPage() {
                             <div className="font-semibold text-gray-950">{String(profile.company_name || profile.full_name || 'Workspace')}</div>
                             <div className="mt-1 text-xs text-gray-500">{String(profile.email || profile.user_id)}</div>
                           </td>
-                          <td className="py-4 pr-4 text-gray-700">{labelize(profile.selected_plan)}</td>
                           <td className="py-4 pr-4">
-                            <StatusBadge status={profile.billing_status || 'unknown'} compact />
+                            <div className="min-w-[130px]">
+                              <p className="font-semibold text-gray-900">{labelize(profile.selected_plan)}</p>
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <StatusBadge status={profile.billing_status || 'unknown'} compact />
+                                <span className="text-xs text-gray-500">{labelize(profile.billing_cycle)}</span>
+                              </div>
+                            </div>
                           </td>
-                          <td className="py-4 pr-4 text-gray-700">{labelize(profile.billing_cycle)}</td>
                           <td className="py-4 pr-4">
-                            <div className="min-w-[160px]">
+                            <div className="min-w-[180px]">
                               <div className="flex flex-wrap items-center gap-2">
                                 <span className="font-semibold text-gray-950">{payment.label}</span>
                                 <StatusBadge status={payment.status} compact />
                               </div>
                               <p className="mt-1 text-xs text-gray-500">{payment.detail}</p>
                               {payment.subDetail ? <p className="mt-1 truncate font-mono text-[11px] text-gray-400">{payment.subDetail}</p> : null}
+                            </div>
+                          </td>
+                          <td className="py-4 pr-4">
+                            <p className="whitespace-nowrap font-semibold text-gray-950">
+                              {payment.amountPaid > 0 ? formatCurrency(payment.amountPaid, payment.currency) : 'Not available'}
+                            </p>
+                          </td>
+                          <td className="py-4 pr-4 text-xs text-gray-600">{paymentDate(payment.paymentDate)}</td>
+                          <td className="py-4 pr-4 text-xs text-gray-600">{paymentDate(payment.nextDueDate)}</td>
+                          <td className="py-4 pr-4">
+                            <div className="min-w-[120px]">
+                              <StatusBadge status={payment.mandateEnabled ? 'enabled' : 'disabled'} severity={payment.mandateEnabled ? 'success' : 'warning'} compact />
+                              <p className="mt-1 text-xs text-gray-500">{labelize(payment.mandateStatus)}</p>
+                              {payment.tokenId ? <p className="mt-1 max-w-[130px] truncate font-mono text-[11px] text-gray-400">{payment.tokenId}</p> : null}
                             </div>
                           </td>
                           <td className="py-4 font-mono text-xs text-gray-500">{String(profile.razorpay_subscription_id || 'Not linked')}</td>

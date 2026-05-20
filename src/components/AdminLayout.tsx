@@ -3,7 +3,6 @@ import {
   Activity,
   AlertTriangle,
   Bell,
-  BookOpenText,
   Boxes,
   Building2,
   ChevronDown,
@@ -11,7 +10,6 @@ import {
   CreditCard,
   Gauge,
   Globe2,
-  Inbox,
   LayoutDashboard,
   Loader2,
   LogOut,
@@ -72,15 +70,6 @@ const navSections = [
       { label: 'Client Feature Operations', path: '/dashboard/client-features', icon: Boxes, permissions: ['global_integrations'] },
       { label: 'User Platform Settings', path: '/dashboard/platform-settings', icon: SlidersHorizontal, permissions: ['platform_settings'] },
       { label: 'Global Integrations', path: '/dashboard/global-integrations', icon: Globe2, permissions: ['global_integrations'] },
-    ],
-  },
-  {
-    id: 'website',
-    title: 'Website Management',
-    icon: BookOpenText,
-    items: [
-      { label: 'Blogs & Help Center', path: '/dashboard/website', icon: BookOpenText, permissions: ['website_management'] },
-      { label: 'Lead Form Data', path: '/dashboard/website-leads', icon: Inbox, permissions: ['website_management'] },
     ],
   },
   {
@@ -388,6 +377,13 @@ export default function AdminLayout({ adminEmail, adminAccess }: AdminLayoutProp
               <span className={`h-2 w-2 rounded-full ${statusTone}`} />
               Live {status}
             </div>
+            <button
+              type="button"
+              onClick={() => navigate('/website-management')}
+              className="hidden rounded-2xl border border-gray-800 bg-gray-900 px-4 py-2 text-sm font-semibold text-gray-300 transition hover:bg-gray-800 hover:text-white sm:inline-flex"
+            >
+              Switch to Website Management
+            </button>
           </div>
 
           <div className="flex items-center gap-3">

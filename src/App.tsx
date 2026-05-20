@@ -8,8 +8,10 @@ import { getCachedSession, supabase } from './lib/supabase';
 import { LiveEventsProvider } from './lib/liveEvents';
 import type { AdminAccessSummary } from './lib/types';
 import AdminLayout from './components/AdminLayout';
+import WebsiteLayout from './components/WebsiteLayout';
 import BrandMark from './components/BrandMark';
 import TurnstileWidget from './components/TurnstileWidget';
+import ManagementSelectorPage from './pages/ManagementSelectorPage';
 import CommandCenter from './pages/CommandCenter';
 import OrganizationsPage from './pages/OrganizationsPage';
 import UsersPage from './pages/UsersPage';
@@ -156,7 +158,7 @@ function LoginPage() {
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-950 outline-none transition placeholder:text-gray-400 focus:border-[#5b45ff] focus:ring-1 focus:ring-[#5b45ff]"
-                  placeholder="admin@connektly.in"
+                  placeholder="User@domain.com"
                   autoComplete="email"
                 />
               </label>
@@ -430,7 +432,15 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={session ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
+        <Route path="/login" element={session ? <Navigate to="/manage" replace /> : <LoginPage />} />
+        <Route
+          path="/manage"
+          element={
+            <ProtectedAdmin session={session}>
+              {(adminEmail, adminAccess) => <ManagementSelectorPage adminEmail={adminEmail} adminAccess={adminAccess} />}
+            </ProtectedAdmin>
+          }
+        />
         <Route
           path="/dashboard"
           element={
@@ -451,15 +461,27 @@ export default function App() {
           <Route path="logs-monitoring" element={<LogsMonitoringPage />} />
           <Route path="global-integrations" element={<GlobalIntegrationsPage />} />
           <Route path="client-features" element={<ClientFeatureOperationsPage />} />
-          <Route path="website" element={<WebsiteManagementPage />} />
-          <Route path="website-leads" element={<WebsiteLeadFormDataPage />} />
+          <Route path="website" element={<Navigate to="/website-management/content" replace />} />
+          <Route path="website-leads" element={<Navigate to="/website-management/leads" replace />} />
           <Route path="payments" element={<PaymentsPage />} />
           <Route path="webhooks" element={<WebhooksPage />} />
           <Route path="server" element={<Navigate to="/dashboard/logs-monitoring" replace />} />
           <Route path="audit" element={<Navigate to="/dashboard/logs-monitoring" replace />} />
           <Route path="settings" element={<OwnerSettingsPage />} />
         </Route>
-        <Route path="*" element={<Navigate to={session ? '/dashboard' : '/login'} replace />} />
+        <Route
+          path="/website-management"
+          element={
+            <ProtectedAdmin session={session}>
+              {(adminEmail, adminAccess) => <WebsiteLayout adminEmail={adminEmail} adminAccess={adminAccess} />}
+            </ProtectedAdmin>
+          }
+        >
+          <Route index element={<Navigate to="/website-management/content" replace />} />
+          <Route path="content" element={<WebsiteManagementPage />} />
+          <Route path="leads" element={<WebsiteLeadFormDataPage />} />
+        </Route>
+        <Route path="*" element={<Navigate to={session ? '/manage' : '/login'} replace />} />
       </Routes>
     </BrowserRouter>
   );

@@ -1527,6 +1527,19 @@ function normalizePaymentAmount(row: JsonRecord) {
   return 0;
 }
 
+function normalizeRazorpayTimestamp(value: unknown) {
+  const numeric = normalizeNumber(value);
+  if (numeric > 0) {
+    return new Date(numeric * 1000).toISOString();
+  }
+  return normalizeString(value);
+}
+
+function normalizeRazorpayAmount(value: unknown) {
+  const numeric = normalizeNumber(value);
+  return numeric > 0 ? Math.round((numeric / 100) * 100) / 100 : 0;
+}
+
 function normalizePaymentMethodLabel(method: unknown, cardType?: unknown) {
   const value = String(method || '').toLowerCase();
   if (value === 'upi') return 'UPI';
@@ -1584,52 +1597,98 @@ function latestPaidInvoice(invoices: unknown) {
     .sort((left, right) => normalizeNumber(right.created_at) - normalizeNumber(left.created_at))[0] || null;
 }
 
-function mapRazorpayPaymentMethod(payment: JsonRecord | null, invoice: JsonRecord | null, error?: string | null) {
+function mapRazorpayPaymentMethod(
+  payment: JsonRecord | null,
+  invoice: JsonRecord | null,
+  subscription: JsonRecord | null = null,
+  error?: string | null,
+) {
   const method = normalizeString(payment?.method) || normalizeString(invoice?.payment_method);
   const card = isRecord(payment?.card) ? payment.card as JsonRecord : {};
   const upi = isRecord(payment?.upi) ? payment.upi as JsonRecord : {};
+  const token = isRecord(payment?.token) ? payment.token as JsonRecord : {};
   const cardLast4 =
     normalizeString(card.last4) ||
     normalizeString(payment?.card_last4) ||
     normalizeString(payment?.card_last_four);
   const cardType = normalizeString(card.type) || normalizeString(payment?.card_type);
+  const cardNetwork = normalizeString(card.network) || normalizeString(payment?.card_network);
+  const amountPaid =
+    normalizeRazorpayAmount(payment?.amount) ||
+    normalizeRazorpayAmount(invoice?.amount_paid) ||
+    normalizePaymentAmount(payment || {}) ||
+    normalizePaymentAmount(invoice || {});
+  const paymentDate =
+    normalizeRazorpayTimestamp(payment?.created_at) ||
+    normalizeRazorpayTimestamp(invoice?.paid_at) ||
+    normalizeRazorpayTimestamp(invoice?.created_at);
+  const nextDueDate =
+    normalizeRazorpayTimestamp(subscription?.charge_at) ||
+    normalizeRazorpayTimestamp(subscription?.current_end) ||
+    normalizeRazorpayTimestamp(subscription?.end_at) ||
+    normalizeRazorpayTimestamp(invoice?.next_payment_at) ||
+    null;
+  const tokenId = normalizeString(payment?.token_id) || normalizeString(token.id);
+  const mandateEnabled = Boolean(
+    tokenId ||
+    payment?.recurring === true ||
+    subscription?.status === 'active' ||
+    normalizeString(subscription?.auth_status) === 'authorized',
+  );
 
   return {
     method: method || null,
     label: normalizePaymentMethodLabel(method, cardType),
     cardLast4,
-    cardNetwork: normalizeString(card.network),
+    cardNetwork,
     cardType,
+    cardIssuer: normalizeString(card.issuer),
     upiVpa: normalizeString(payment?.vpa) || normalizeString(upi.vpa),
     paymentId: normalizeString(payment?.id) || normalizeString(invoice?.payment_id),
     invoiceId: normalizeString(invoice?.id),
+    subscriptionId: normalizeString(subscription?.id),
     status: normalizeString(payment?.status) || normalizeString(invoice?.status),
+    amountPaid,
+    currency: normalizeString(payment?.currency) || normalizeString(invoice?.currency) || 'INR',
+    paymentDate,
+    nextDueDate,
+    mandateEnabled,
+    mandateStatus: mandateEnabled ? normalizeString(subscription?.status) || normalizeString(payment?.status) || 'enabled' : 'not_enabled',
+    tokenId,
     error: error || null,
   };
 }
 
 async function resolveSubscriptionPaymentMethod(subscriptionId: string) {
   if (!getRazorpayAuthHeader()) {
-    return mapRazorpayPaymentMethod(null, null, 'Razorpay API keys are not configured.');
+    return mapRazorpayPaymentMethod(null, null, null, 'Razorpay API keys are not configured.');
   }
 
   try {
-    const invoices = await fetchRazorpayJson('invoices', {
-      subscription_id: subscriptionId,
-      count: '10',
-    });
+    const [invoices, subscription] = await Promise.all([
+      fetchRazorpayJson('invoices', {
+        subscription_id: subscriptionId,
+        count: '10',
+      }),
+      fetchRazorpayJson(`subscriptions/${encodeURIComponent(subscriptionId)}`).catch(() => null),
+    ]);
     const invoice = latestPaidInvoice(invoices);
     const paymentId = normalizeString(invoice?.payment_id);
     if (!invoice || !paymentId) {
-      return mapRazorpayPaymentMethod(null, invoice, 'No paid invoice payment was found for this subscription.');
+      return mapRazorpayPaymentMethod(
+        null,
+        invoice,
+        isRecord(subscription) ? subscription : null,
+        'No paid invoice payment was found for this subscription.',
+      );
     }
 
     const payment = await fetchRazorpayJson(`payments/${encodeURIComponent(paymentId)}`, {
       'expand[]': 'card',
     });
-    return mapRazorpayPaymentMethod(isRecord(payment) ? payment : null, invoice);
+    return mapRazorpayPaymentMethod(isRecord(payment) ? payment : null, invoice, isRecord(subscription) ? subscription : null);
   } catch (error) {
-    return mapRazorpayPaymentMethod(null, null, error instanceof Error ? error.message : String(error));
+    return mapRazorpayPaymentMethod(null, null, null, error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -1642,7 +1701,7 @@ async function enrichProfilesWithPaymentMethods(profiles: JsonRecord[]) {
     if (!subscriptionId) {
       enriched.push({
         ...profile,
-        payment_method: mapRazorpayPaymentMethod(null, null, 'No Razorpay subscription is linked.'),
+        payment_method: mapRazorpayPaymentMethod(null, null, null, 'No Razorpay subscription is linked.'),
       });
       continue;
     }
