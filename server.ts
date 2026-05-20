@@ -65,6 +65,15 @@ type LivePayload = {
   payload?: unknown;
 };
 
+type MetaApiContext = {
+  isMetaApi: boolean;
+  apiProvider: string | null;
+  apiEndpoint: string | null;
+  apiMethod: string | null;
+  metaFeatureName: string | null;
+  metaPermissionName: string | null;
+};
+
 type ClientFeatureKey =
   | 'whatsapp'
   | 'instagram'
@@ -87,6 +96,7 @@ const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL ||
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const clientApiBaseUrl = process.env.CLIENT_API_BASE_URL || '';
+const clientApiHealthUrl = process.env.CLIENT_API_HEALTH_URL || '';
 const websitePublicBaseUrl = normalizeWebsitePublicBaseUrl(process.env.WEBSITE_PUBLIC_BASE_URL || process.env.WEBSITE_API_BASE_URL);
 const websiteApiBaseUrl = normalizeWebsiteApiBaseUrl(process.env.WEBSITE_API_BASE_URL || `${websitePublicBaseUrl}/api`);
 const websiteContentSyncToken = process.env.WEBSITE_CONTENT_SYNC_TOKEN || '';
@@ -1780,6 +1790,170 @@ function logOccurredAt(row: JsonRecord) {
   return normalizeString(row.created_at) || normalizeString(row.updated_at) || nowIso();
 }
 
+function pickLogString(row: JsonRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = normalizeString(row[key]);
+    if (value) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function logText(row: JsonRecord, extras: Array<string | null | undefined> = []) {
+  return [
+    ...extras,
+    row.provider,
+    row.platform,
+    row.channel,
+    row.channel_type,
+    row.source,
+    row.integration,
+    row.type,
+    row.event_type,
+    row.message_type,
+    row.endpoint,
+    row.api_endpoint,
+    row.path,
+    row.url,
+    row.table_name,
+    row.error_message,
+    row.failure_reason,
+    row.status,
+    row.processing_status,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+}
+
+function metaContext(
+  featureName: string,
+  permissionName: string,
+  endpoint?: string | null,
+  method?: string | null,
+): MetaApiContext {
+  return {
+    isMetaApi: true,
+    apiProvider: 'Meta Graph API',
+    apiEndpoint: endpoint || null,
+    apiMethod: method || null,
+    metaFeatureName: featureName,
+    metaPermissionName: permissionName,
+  };
+}
+
+function nonMetaContext(endpoint?: string | null, method?: string | null): MetaApiContext {
+  return {
+    isMetaApi: false,
+    apiProvider: null,
+    apiEndpoint: endpoint || null,
+    apiMethod: method || null,
+    metaFeatureName: null,
+    metaPermissionName: null,
+  };
+}
+
+function metaApiContextForText(text: string, endpoint?: string | null, method?: string | null): MetaApiContext | null {
+  const value = text.toLowerCase();
+  if (value.includes('lead') || value.includes('leadgen')) {
+    return metaContext('Meta Lead Ads / Lead Retrieval', 'leads_retrieval, pages_manage_ads, pages_show_list', endpoint, method);
+  }
+  if (value.includes('ads') || value.includes('campaign') || value.includes('ad_account')) {
+    return metaContext('Meta Marketing API', 'ads_read, ads_management', endpoint, method);
+  }
+  if (value.includes('messenger') || value.includes('page_id') || value.includes('facebook_page')) {
+    return metaContext('Messenger Platform', 'pages_messaging, pages_show_list', endpoint, method);
+  }
+  if (value.includes('instagram')) {
+    return metaContext('Instagram Messaging API', 'instagram_basic, instagram_manage_messages, pages_show_list', endpoint, method);
+  }
+  if (value.includes('flow')) {
+    return metaContext('WhatsApp Flows API', 'whatsapp_business_management', endpoint, method);
+  }
+  if (value.includes('template')) {
+    return metaContext('WhatsApp Message Templates', 'whatsapp_business_management', endpoint, method);
+  }
+  if (value.includes('call')) {
+    return metaContext('WhatsApp Calling API', 'whatsapp_business_messaging', endpoint, method);
+  }
+  if (value.includes('payment')) {
+    return metaContext('WhatsApp Payments', 'whatsapp_business_management', endpoint, method);
+  }
+  if (value.includes('whatsapp') || value.includes('waba') || value.includes('phone_number') || value.includes('messages')) {
+    return metaContext('WhatsApp Cloud API', 'whatsapp_business_messaging, whatsapp_business_management', endpoint, method);
+  }
+  if (value.includes('graph.facebook.com') || value.includes('meta')) {
+    return metaContext('Meta Graph API', 'Meta app access token permissions', endpoint, method);
+  }
+  return null;
+}
+
+function metaApiContextForPath(pathname: string, method?: string | null): MetaApiContext {
+  const endpoint = `/${String(pathname).replace(/^\/+/, '')}`;
+  if (endpoint.includes('/subscribed_apps')) {
+    return metaContext('WhatsApp Business Webhooks', 'whatsapp_business_management', endpoint, method || null);
+  }
+  if (endpoint.includes('/request_code')) {
+    return metaContext('WhatsApp Phone Number Verification', 'whatsapp_business_management', endpoint, method || null);
+  }
+  return metaApiContextForText(endpoint, endpoint, method || null) || metaContext('Meta Graph API', 'Meta app access token permissions', endpoint, method || null);
+}
+
+function metaApiContextForTable(table: string | null | undefined, row: JsonRecord = {}, endpointOverride?: string | null, methodOverride?: string | null): MetaApiContext {
+  const endpoint = endpointOverride || pickLogString(row, ['api_endpoint', 'endpoint', 'path', 'url', 'callback_url', 'webhook_url']);
+  const method = methodOverride || pickLogString(row, ['method', 'http_method', 'request_method']);
+  const normalizedTable = normalizeString(table);
+
+  if (normalizedTable === 'meta_channels') {
+    return metaContext('WhatsApp Business Platform', 'whatsapp_business_management, whatsapp_business_messaging', endpoint, method);
+  }
+  if (normalizedTable === 'instagram_channels') {
+    return metaContext('Instagram Messaging API', 'instagram_basic, instagram_manage_messages, pages_show_list', endpoint, method);
+  }
+  if (normalizedTable === 'messenger_channels') {
+    return metaContext('Messenger Platform', 'pages_messaging, pages_show_list', endpoint, method);
+  }
+  if (normalizedTable === 'meta_ads_integrations') {
+    return metaContext('Meta Marketing API', 'ads_read, ads_management', endpoint, method);
+  }
+  if (normalizedTable === 'meta_lead_capture_configs' || normalizedTable === 'meta_lead_capture_events') {
+    return metaContext('Meta Lead Ads / Lead Retrieval', 'leads_retrieval, pages_manage_ads, pages_show_list', endpoint, method);
+  }
+  if (normalizedTable === 'whatsapp_payment_configuration_events') {
+    return metaContext('WhatsApp Payments', 'whatsapp_business_management', endpoint, method);
+  }
+  if (normalizedTable === 'meta_flows' || normalizedTable === 'flow_submissions') {
+    return metaContext('WhatsApp Flows API', 'whatsapp_business_management', endpoint, method);
+  }
+  if (normalizedTable === 'meta_templates') {
+    return metaContext('WhatsApp Message Templates', 'whatsapp_business_management', endpoint, method);
+  }
+  if (normalizedTable === 'call_sessions' || normalizedTable === 'call_logs') {
+    return metaContext('WhatsApp Calling API', 'whatsapp_business_messaging', endpoint, method);
+  }
+  if (normalizedTable === 'conversation_messages' || normalizedTable === 'conversation_threads') {
+    return metaApiContextForText(logText(row, [normalizedTable]), endpoint, method) || metaContext('WhatsApp Cloud API', 'whatsapp_business_messaging', endpoint, method);
+  }
+
+  return metaApiContextForText(logText(row, [normalizedTable]), endpoint, method) || nonMetaContext(endpoint, method);
+}
+
+function metaApiContextForLiveEvent(event: LivePayload): MetaApiContext {
+  const payload = isRecord(event.payload) ? event.payload as JsonRecord : {};
+  if (payload.isMetaApi === true) {
+    return {
+      isMetaApi: true,
+      apiProvider: normalizeString(payload.apiProvider) || 'Meta Graph API',
+      apiEndpoint: normalizeString(payload.apiEndpoint),
+      apiMethod: normalizeString(payload.apiMethod),
+      metaFeatureName: normalizeString(payload.metaFeatureName) || 'Meta Graph API',
+      metaPermissionName: normalizeString(payload.metaPermissionName) || 'Meta app access token permissions',
+    };
+  }
+  return metaApiContextForTable(event.table, payload);
+}
+
 function buildLogEntry(args: {
   row: JsonRecord;
   idPrefix: string;
@@ -1787,13 +1961,18 @@ function buildLogEntry(args: {
   source: string;
   title: string;
   fallbackOrgId?: string | null;
+  table?: string;
+  endpoint?: string | null;
+  method?: string | null;
+  meta?: MetaApiContext;
 }) {
   const orgId = rowOwnerUserId(args.row) || normalizeString(args.row.org_id) || normalizeString(args.row.organization_id) || args.fallbackOrgId || null;
   const status = logStatus(args.row);
   const errorType = logErrorType(args.row);
   const failed = isFailedRow(args.row);
+  const meta = args.meta || metaApiContextForTable(args.table, args.row, args.endpoint, args.method);
   return {
-    id: normalizeString(args.row.id) || `${args.idPrefix}:${orgId || 'global'}:${logOccurredAt(args.row)}`,
+    id: `${args.idPrefix}:${normalizeString(args.row.id) || `${orgId || 'global'}:${logOccurredAt(args.row)}`}`,
     occurredAt: logOccurredAt(args.row),
     orgId,
     userId: normalizeString(args.row.user_id) || orgId,
@@ -1805,6 +1984,12 @@ function buildLogEntry(args: {
     severity: failed ? 'critical' : 'info',
     detail: logDetail(args.row),
     payload: args.row,
+    isMetaApi: meta.isMetaApi,
+    apiProvider: meta.apiProvider || args.source,
+    apiEndpoint: meta.apiEndpoint,
+    apiMethod: meta.apiMethod,
+    metaFeatureName: meta.metaFeatureName,
+    metaPermissionName: meta.metaPermissionName,
   };
 }
 
@@ -2081,25 +2266,64 @@ async function metaRequest<T>(args: {
   body?: JsonRecord;
 }) {
   const url = new URL(`https://graph.facebook.com/${graphVersion}/${String(args.path).replace(/^\/+/, '')}`);
+  const method = args.method || 'GET';
+  const meta = metaApiContextForPath(args.path, method);
+  const startedAt = performance.now();
+  let responseStatus: number | null = null;
+  let responseOk = false;
+  let failureMessage: string | null = null;
   for (const [key, value] of Object.entries(args.query || {})) {
     url.searchParams.set(key, value);
   }
 
-  const response = await fetch(url, {
-    method: args.method || 'GET',
-    headers: {
-      Authorization: `Bearer ${args.accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: args.body ? JSON.stringify(args.body) : undefined,
-  });
-  const payload = await response.json().catch(() => null) as T;
+  try {
+    const response = await fetch(url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${args.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: args.body ? JSON.stringify(args.body) : undefined,
+    });
+    responseStatus = response.status;
+    responseOk = response.ok;
+    const payload = await response.json().catch(() => null) as T;
 
-  if (!response.ok) {
-    throw new Error(metaErrorMessage(payload) || `Meta Graph API request failed with status ${response.status}.`);
+    if (!response.ok) {
+      failureMessage = metaErrorMessage(payload) || `Meta Graph API request failed with status ${response.status}.`;
+      throw new Error(failureMessage);
+    }
+
+    return payload;
+  } catch (error) {
+    failureMessage = failureMessage || (error instanceof Error ? error.message : String(error));
+    throw error;
+  } finally {
+    const endpoint = `/${graphVersion}/${String(args.path).replace(/^\/+/, '')}`;
+    pushLiveEvent({
+      id: `meta-api:${method}:${String(args.path).replace(/[^a-z0-9_-]+/gi, '-')}:${Date.now()}`,
+      occurredAt: nowIso(),
+      source: 'Meta Graph API',
+      eventType: 'META_API_REQUEST',
+      title: `${method} ${meta.metaFeatureName || 'Meta Graph API'}`,
+      description: failureMessage || `${method} ${endpoint} completed with status ${responseStatus || 'unknown'}.`,
+      severity: responseOk ? 'success' : 'critical',
+      status: responseStatus ? String(responseStatus) : 'failed',
+      payload: {
+        isMetaApi: true,
+        apiProvider: 'Meta Graph API',
+        apiEndpoint: endpoint,
+        apiMethod: method,
+        metaFeatureName: meta.metaFeatureName,
+        metaPermissionName: meta.metaPermissionName,
+        status: responseStatus,
+        ok: responseOk,
+        latencyMs: Math.round(performance.now() - startedAt),
+        queryKeys: Object.keys(args.query || {}),
+        bodyKeys: args.body ? Object.keys(args.body) : [],
+      },
+    });
   }
-
-  return payload;
 }
 
 async function getOrgWhatsAppChannel(orgId: string) {
@@ -2286,8 +2510,8 @@ function summarizeHealth(dbLatencyMs: number | null, clientHealth: JsonRecord | 
     },
     {
       label: 'Client API health URL',
-      ok: Boolean(clientApiBaseUrl),
-      detail: clientApiBaseUrl || 'Not configured',
+      ok: Boolean(clientApiHealthUrl || clientApiBaseUrl),
+      detail: clientApiHealthUrl || (clientApiBaseUrl ? `${clientApiBaseUrl.replace(/\/$/, '')}/health` : 'Not configured'),
     },
   ];
 
@@ -2323,38 +2547,75 @@ async function checkDbLatency() {
 }
 
 async function checkClientApiHealth() {
-  if (!clientApiBaseUrl) {
+  const configuredHealthUrl = clientApiHealthUrl.trim();
+  if (!configuredHealthUrl && !clientApiBaseUrl) {
     return null;
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 4000);
-  const healthUrl = `${clientApiBaseUrl.replace(/\/$/, '')}/health`;
+  const healthUrls = new Set<string>();
+  const configuredUrl = configuredHealthUrl || `${clientApiBaseUrl.replace(/\/$/, '')}/health`;
+  healthUrls.add(configuredUrl);
 
-  try {
-    const startedAt = performance.now();
-    const response = await fetch(healthUrl, { signal: controller.signal });
-    const text = await response.text().catch(() => '');
-    return {
-      url: healthUrl,
-      ok: response.ok,
-      status: response.status,
-      latencyMs: Math.round(performance.now() - startedAt),
-      body: text.slice(0, 300),
-      checkedAt: nowIso(),
-    };
-  } catch (error) {
-    return {
-      url: healthUrl,
-      ok: false,
-      status: null,
-      latencyMs: null,
-      body: error instanceof Error ? error.message : String(error),
-      checkedAt: nowIso(),
-    };
-  } finally {
-    clearTimeout(timeout);
+  for (const url of [...healthUrls]) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname.startsWith('www.')) {
+        parsed.hostname = parsed.hostname.replace(/^www\./, '');
+        healthUrls.add(parsed.toString());
+      }
+    } catch {
+      // Keep the original configured URL; the fetch below will report the problem.
+    }
   }
+
+  const attempts: JsonRecord[] = [];
+  for (const healthUrl of healthUrls) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const startedAt = performance.now();
+    try {
+      const response = await fetch(healthUrl, { signal: controller.signal });
+      const text = await response.text().catch(() => '');
+      const result = {
+        url: healthUrl,
+        ok: response.ok,
+        status: response.status,
+        latencyMs: Math.round(performance.now() - startedAt),
+        body: text.slice(0, 300),
+        checkedAt: nowIso(),
+        attempts,
+      };
+      if (response.ok) {
+        return result;
+      }
+      attempts.push({
+        url: healthUrl,
+        status: response.status,
+        body: text.slice(0, 300),
+        latencyMs: result.latencyMs,
+      });
+    } catch (error) {
+      attempts.push({
+        url: healthUrl,
+        status: null,
+        body: error instanceof Error ? error.message : String(error),
+        latencyMs: null,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  const lastAttempt = attempts[attempts.length - 1] || {};
+  return {
+    url: normalizeString(lastAttempt.url) || configuredUrl,
+    ok: false,
+    status: null,
+    latencyMs: null,
+    body: normalizeString(lastAttempt.body) || 'Client API health check failed.',
+    checkedAt: nowIso(),
+    attempts,
+  };
 }
 
 function getEventTitle(table: string, row: JsonRecord, eventType: string) {
@@ -3173,8 +3434,181 @@ function buildWebhookReferences(args: {
   return [...references, ...developerReferences].map((webhook) => withWebhookStats(webhook, events));
 }
 
+function userActivityTimestamp(row: JsonRecord, fallbackKey = 'created_at') {
+  return (
+    normalizeString(row.onboarding_completed_at) ||
+    normalizeString(row.completed_at) ||
+    normalizeString(row.paid_at) ||
+    normalizeString(row.payment_at) ||
+    normalizeString(row.expires_at) ||
+    normalizeString(row.trial_ends_at) ||
+    normalizeString(row[fallbackKey]) ||
+    normalizeString(row.updated_at) ||
+    nowIso()
+  );
+}
+
+function userActivityDetails(user: ReturnType<typeof buildUserRows>[number] | undefined, fallbackUserId: string | null, extra: JsonRecord = {}) {
+  return {
+    userId: user?.userId || fallbackUserId,
+    fullName: user?.fullName || normalizeString(extra.fullName) || 'Unknown user',
+    email: user?.email || normalizeString(extra.email),
+    companyName: user?.companyName || normalizeString(extra.companyName),
+    phone: user?.phone || normalizeString(extra.phone),
+    selectedPlan: user?.selectedPlan || normalizeString(extra.selectedPlan),
+    billingCycle: user?.billingCycle || normalizeString(extra.billingCycle),
+    billingStatus: user?.billingStatus || normalizeString(extra.billingStatus),
+    trialEndsAt: user?.trialEndsAt || normalizeString(extra.trialEndsAt),
+    onboardingCompleted: user?.onboardingCompleted ?? Boolean(extra.onboardingCompleted),
+  };
+}
+
+function isSuccessfulPaymentRow(row: JsonRecord) {
+  const value = [
+    row.status,
+    row.payment_status,
+    row.event_type,
+    row.type,
+    row.description,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (/fail|error|declin|past_due|cancel|refund/.test(value)) {
+    return false;
+  }
+  return /paid|success|captur|complete|payment/.test(value) || normalizePaymentAmount(row) > 0;
+}
+
+function buildUserActivityNotifications(core: Awaited<ReturnType<typeof loadCoreData>>, authUsers: User[]) {
+  const users = buildUserRows({
+    authUsers,
+    profiles: core.profiles,
+    metaChannels: core.metaChannels,
+    instagramChannels: core.instagramChannels,
+    messengerChannels: core.messengerChannels,
+    threads: core.threads,
+    calls: core.callLogs,
+    emailCampaigns: core.emailCampaigns,
+    creditLedger: core.creditLedger,
+  });
+  const userById = new Map(users.map((user) => [user.userId, user]));
+  const now = Date.now();
+
+  const signups = users
+    .filter((user) => Boolean(user.createdAt))
+    .map((user) => ({
+      id: `signup:${user.userId}:${user.createdAt}`,
+      type: 'signup',
+      title: 'New user signed up',
+      occurredAt: user.createdAt || nowIso(),
+      severity: 'info' as const,
+      status: 'signed_up',
+      description: `${user.fullName} joined ${user.companyName || 'Connektly'}.`,
+      user: userActivityDetails(user, user.userId),
+      metadata: {
+        channels: user.channels.length,
+        lastSignInAt: user.lastSignInAt,
+      },
+    }));
+
+  const onboarding = core.profiles
+    .filter((row) => row.onboarding_completed === true || String(normalizeString(row.onboarding_status) || '').toLowerCase() === 'completed')
+    .map((row) => {
+      const userId = rowOwnerUserId(row);
+      const user = userId ? userById.get(userId) : undefined;
+      const occurredAt = userActivityTimestamp(row, 'updated_at');
+      return {
+        id: `onboarding:${userId || normalizeString(row.id) || occurredAt}`,
+        type: 'onboarding',
+        title: 'User successfully onboarded',
+        occurredAt,
+        severity: 'success' as const,
+        status: 'onboarded',
+        description: `${user?.fullName || normalizeString(row.full_name) || 'A user'} completed onboarding.`,
+        user: userActivityDetails(user, userId, {
+          fullName: normalizeString(row.full_name),
+          email: normalizeString(row.email),
+          companyName: normalizeString(row.company_name),
+          selectedPlan: normalizeString(row.selected_plan),
+          billingCycle: normalizeString(row.billing_cycle),
+          billingStatus: normalizeString(row.billing_status),
+          trialEndsAt: normalizeString(row.trial_ends_at),
+          onboardingCompleted: true,
+        }),
+        metadata: {
+          completedAt: occurredAt,
+        },
+      };
+    });
+
+  const trialExpiries = users
+    .filter((user) => {
+      const trialEndsAt = user.trialEndsAt ? Date.parse(user.trialEndsAt) : NaN;
+      const billingStatus = String(user.billingStatus || '').toLowerCase();
+      return Number.isFinite(trialEndsAt) && trialEndsAt <= now && (billingStatus.includes('trial') || !['active', 'paid'].includes(billingStatus));
+    })
+    .map((user) => ({
+      id: `trial-expired:${user.userId}:${user.trialEndsAt}`,
+      type: 'trial_expired',
+      title: 'User trial expired',
+      occurredAt: user.trialEndsAt || nowIso(),
+      severity: 'warning' as const,
+      status: 'trial_expired',
+      description: `${user.fullName}'s ${user.selectedPlan || 'trial'} access has expired.`,
+      user: userActivityDetails(user, user.userId),
+      metadata: {
+        trialEndsAt: user.trialEndsAt,
+      },
+    }));
+
+  const payments = core.paymentEvents
+    .filter(isSuccessfulPaymentRow)
+    .map((row) => {
+      const userId = rowOwnerUserId(row);
+      const user = userId ? userById.get(userId) : undefined;
+      const amount = Math.round(normalizePaymentAmount(row) * 100) / 100;
+      const occurredAt = userActivityTimestamp(row);
+      return {
+        id: `payment:${normalizeString(row.id) || `${userId || 'unknown'}:${occurredAt}`}`,
+        type: 'payment',
+        title: 'User payment received',
+        occurredAt,
+        severity: 'success' as const,
+        status: normalizeString(row.status) || normalizeString(row.payment_status) || 'paid',
+        description: `${user?.fullName || 'A user'} made a payment${amount > 0 ? ` of INR ${amount}` : ''}.`,
+        user: userActivityDetails(user, userId),
+        metadata: {
+          amount,
+          currency: normalizeString(row.currency) || 'INR',
+          reference:
+            normalizeString(row.razorpay_payment_id) ||
+            normalizeString(row.provider_payment_id) ||
+            normalizeString(row.payment_id) ||
+            normalizeString(row.id),
+        },
+      };
+    });
+
+  return [...signups, ...onboarding, ...trialExpiries, ...payments]
+    .sort((left, right) => Date.parse(String(right.occurredAt || 0)) - Date.parse(String(left.occurredAt || 0)))
+    .slice(0, 50);
+}
+
 function buildOverview(core: Awaited<ReturnType<typeof loadCoreData>>, authUsers: User[], health: ReturnType<typeof summarizeHealth>) {
   const organizations = buildOrganizationRows(core, authUsers);
+  const userRows = buildUserRows({
+    authUsers,
+    profiles: core.profiles,
+    metaChannels: core.metaChannels,
+    instagramChannels: core.instagramChannels,
+    messengerChannels: core.messengerChannels,
+    threads: core.threads,
+    calls: core.callLogs,
+    emailCampaigns: core.emailCampaigns,
+    creditLedger: core.creditLedger,
+  });
   const totalCredits = core.creditLedger.reduce((total, row) => {
     const amount = normalizeNumber(row.amount);
     return row.type === 'deduction' ? total - amount : total + amount;
@@ -3324,17 +3758,8 @@ function buildOverview(core: Awaited<ReturnType<typeof loadCoreData>>, authUsers
     planBreakdown,
     health,
     timeline: buildTimeline(core),
-    recentUsers: buildUserRows({
-      authUsers,
-      profiles: core.profiles,
-      metaChannels: core.metaChannels,
-      instagramChannels: core.instagramChannels,
-      messengerChannels: core.messengerChannels,
-      threads: core.threads,
-      calls: core.callLogs,
-      emailCampaigns: core.emailCampaigns,
-      creditLedger: core.creditLedger,
-    })
+    userActivity: buildUserActivityNotifications(core, authUsers),
+    recentUsers: userRows
       .sort((left, right) => Date.parse(String(right.createdAt || 0)) - Date.parse(String(left.createdAt || 0)))
       .slice(0, 8),
     warnings: core.errors,
@@ -3347,13 +3772,119 @@ function sortLogs<T>(logs: T[]) {
 
 function buildLogsMonitoring(core: Awaited<ReturnType<typeof loadCoreData>>, health: ReturnType<typeof summarizeHealth>) {
   const apiLogs = sortLogs([
+    ...recentLiveEvents
+      .filter((event) => event.eventType === 'META_API_REQUEST' || event.source === 'Meta Graph API')
+      .map((event) => {
+        const meta = metaApiContextForLiveEvent(event);
+        return {
+          id: event.id,
+          occurredAt: event.occurredAt,
+          orgId: event.userId || null,
+          userId: event.userId || null,
+          category: 'api' as const,
+          source: event.source,
+          title: event.title,
+          status: event.status || event.eventType,
+          errorType: event.severity === 'critical' ? 'error' : null,
+          severity: event.severity,
+          detail: event.description || null,
+          payload: event.payload || event,
+          isMetaApi: meta.isMetaApi,
+          apiProvider: meta.apiProvider || event.source,
+          apiEndpoint: meta.apiEndpoint,
+          apiMethod: meta.apiMethod,
+          metaFeatureName: meta.metaFeatureName,
+          metaPermissionName: meta.metaPermissionName,
+        };
+      }),
+    ...core.metaChannels.map((row) =>
+      buildLogEntry({
+        row,
+        idPrefix: 'meta-channel-api',
+        category: 'api',
+        source: 'Meta Graph API',
+        title: `WhatsApp Business API ${logStatus(row)}`,
+        table: 'meta_channels',
+      }),
+    ),
+    ...core.instagramChannels.map((row) =>
+      buildLogEntry({
+        row,
+        idPrefix: 'instagram-api',
+        category: 'api',
+        source: 'Meta Graph API',
+        title: `Instagram API ${logStatus(row)}`,
+        table: 'instagram_channels',
+      }),
+    ),
+    ...core.messengerChannels.map((row) =>
+      buildLogEntry({
+        row,
+        idPrefix: 'messenger-api',
+        category: 'api',
+        source: 'Meta Graph API',
+        title: `Messenger API ${logStatus(row)}`,
+        table: 'messenger_channels',
+      }),
+    ),
+    ...core.metaAdsIntegrations.map((row) =>
+      buildLogEntry({
+        row,
+        idPrefix: 'meta-ads-api',
+        category: 'api',
+        source: 'Meta Graph API',
+        title: `Meta Marketing API ${logStatus(row)}`,
+        table: 'meta_ads_integrations',
+      }),
+    ),
+    ...core.metaLeadCaptureConfigs.map((row) =>
+      buildLogEntry({
+        row,
+        idPrefix: 'lead-config-api',
+        category: 'api',
+        source: 'Meta Graph API',
+        title: `Meta Lead Ads API ${logStatus(row)}`,
+        table: 'meta_lead_capture_configs',
+      }),
+    ),
+    ...core.metaFlows.map((row) =>
+      buildLogEntry({
+        row,
+        idPrefix: 'whatsapp-flow-api',
+        category: 'api',
+        source: 'Meta Graph API',
+        title: `WhatsApp Flows API ${logStatus(row)}`,
+        table: 'meta_flows',
+      }),
+    ),
+    ...core.flowSubmissions.map((row) =>
+      buildLogEntry({
+        row,
+        idPrefix: 'flow-submission-api',
+        category: 'api',
+        source: 'Meta Graph API',
+        title: `WhatsApp Flow submission ${logStatus(row)}`,
+        table: 'flow_submissions',
+      }),
+    ),
+    ...core.templates.map((row) =>
+      buildLogEntry({
+        row,
+        idPrefix: 'message-template-api',
+        category: 'api',
+        source: 'Meta Graph API',
+        title: `WhatsApp template API ${logStatus(row)}`,
+        table: 'meta_templates',
+      }),
+    ),
     ...core.leadEvents.map((row) =>
       buildLogEntry({
         row,
         idPrefix: 'lead-api',
         category: 'api',
-        source: 'Meta Lead API',
+        source: 'Meta Graph API',
         title: 'Meta lead capture API event',
+        table: 'meta_lead_capture_events',
       }),
     ),
     ...core.paymentEvents.map((row) =>
@@ -3361,8 +3892,29 @@ function buildLogsMonitoring(core: Awaited<ReturnType<typeof loadCoreData>>, hea
         row,
         idPrefix: 'payment-api',
         category: 'api',
-        source: 'WhatsApp Payments API',
+        source: 'Meta Graph API',
         title: 'WhatsApp payment API event',
+        table: 'whatsapp_payment_configuration_events',
+      }),
+    ),
+    ...core.messages.map((row) =>
+      buildLogEntry({
+        row,
+        idPrefix: 'message-api',
+        category: 'api',
+        source: 'Messaging API',
+        title: `${normalizeString(row.direction) || 'Message'} API event`,
+        table: 'conversation_messages',
+      }),
+    ),
+    ...core.callLogs.map((row) =>
+      buildLogEntry({
+        row,
+        idPrefix: 'call-log-api',
+        category: 'api',
+        source: 'Meta Graph API',
+        title: 'WhatsApp call API log',
+        table: 'call_logs',
       }),
     ),
     ...core.callSessions.map((row) =>
@@ -3370,11 +3922,12 @@ function buildLogsMonitoring(core: Awaited<ReturnType<typeof loadCoreData>>, hea
         row,
         idPrefix: 'call-api',
         category: 'api',
-        source: 'Calling API',
+        source: 'Meta Graph API',
         title: 'Call session API event',
+        table: 'call_sessions',
       }),
     ),
-  ]).slice(0, 500);
+  ]).slice(0, 1000);
 
   const webhookLogs = sortLogs([
     ...core.leadEvents.map((row) =>
@@ -3384,6 +3937,7 @@ function buildLogsMonitoring(core: Awaited<ReturnType<typeof loadCoreData>>, hea
         category: 'webhook',
         source: 'Meta Lead Webhook',
         title: 'Lead webhook event',
+        table: 'meta_lead_capture_events',
       }),
     ),
     ...core.paymentEvents.map((row) =>
@@ -3393,25 +3947,35 @@ function buildLogsMonitoring(core: Awaited<ReturnType<typeof loadCoreData>>, hea
         category: 'webhook',
         source: 'WhatsApp Webhook',
         title: 'Payment webhook event',
+        table: 'whatsapp_payment_configuration_events',
       }),
     ),
     ...recentLiveEvents
       .filter((event) => event.table?.includes('webhook') || event.table === 'conversation_messages' || event.table === 'call_sessions')
-      .map((event) => ({
-        id: event.id,
-        occurredAt: event.occurredAt,
-        orgId: event.userId || null,
-        userId: event.userId || null,
-        category: 'webhook' as const,
-        source: event.source,
-        title: event.title,
-        status: event.status || event.eventType,
-        errorType: event.severity === 'critical' ? 'error' : null,
-        severity: event.severity,
-        detail: event.description || null,
-        payload: event.payload || event,
-      })),
-  ]).slice(0, 500);
+      .map((event) => {
+        const meta = metaApiContextForLiveEvent(event);
+        return {
+          id: event.id,
+          occurredAt: event.occurredAt,
+          orgId: event.userId || null,
+          userId: event.userId || null,
+          category: 'webhook' as const,
+          source: event.source,
+          title: event.title,
+          status: event.status || event.eventType,
+          errorType: event.severity === 'critical' ? 'error' : null,
+          severity: event.severity,
+          detail: event.description || null,
+          payload: event.payload || event,
+          isMetaApi: meta.isMetaApi,
+          apiProvider: meta.apiProvider || event.source,
+          apiEndpoint: meta.apiEndpoint,
+          apiMethod: meta.apiMethod,
+          metaFeatureName: meta.metaFeatureName,
+          metaPermissionName: meta.metaPermissionName,
+        };
+      }),
+  ]).slice(0, 1000);
 
   const messageDeliveryLogs = sortLogs(
     core.messages.map((row) =>
@@ -3421,9 +3985,10 @@ function buildLogsMonitoring(core: Awaited<ReturnType<typeof loadCoreData>>, hea
         category: 'message_delivery',
         source: 'Messaging',
         title: `${normalizeString(row.direction) || 'Message'} delivery event`,
+        table: 'conversation_messages',
       }),
     ),
-  ).slice(0, 500);
+  ).slice(0, 1000);
 
   const errorLogs = sortLogs([
     ...apiLogs.filter((log) => log.errorType || log.severity === 'critical').map((log) => ({ ...log, category: 'error' as const })),
@@ -3442,6 +4007,12 @@ function buildLogsMonitoring(core: Awaited<ReturnType<typeof loadCoreData>>, hea
       severity: 'warning' as const,
       detail: error,
       payload: { error },
+      isMetaApi: false,
+      apiProvider: 'Admin API',
+      apiEndpoint: null,
+      apiMethod: null,
+      metaFeatureName: null,
+      metaPermissionName: null,
     })),
     ...(health.clientApi && !health.clientApi.ok
       ? [
@@ -3458,10 +4029,16 @@ function buildLogsMonitoring(core: Awaited<ReturnType<typeof loadCoreData>>, hea
             severity: 'critical' as const,
             detail: health.clientApi.body || 'Client API did not return a healthy response.',
             payload: health.clientApi,
+            isMetaApi: false,
+            apiProvider: 'Client API',
+            apiEndpoint: normalizeString(health.clientApi.url),
+            apiMethod: 'GET',
+            metaFeatureName: null,
+            metaPermissionName: null,
           },
         ]
       : []),
-  ]).slice(0, 500);
+  ]).slice(0, 1000);
 
   return {
     generatedAt: nowIso(),

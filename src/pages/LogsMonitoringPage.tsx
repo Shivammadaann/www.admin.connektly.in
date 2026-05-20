@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
   Database,
   FileWarning,
   Loader2,
@@ -38,8 +40,20 @@ function logRowsForTab(data: LogsMonitoringResponse | null, tab: TabId) {
   return [];
 }
 
+function compactApiEndpoint(log: AdminLogEntry) {
+  const endpoint = log.apiEndpoint || '';
+  if (!endpoint) return null;
+  try {
+    const url = new URL(endpoint);
+    return `${url.pathname}${url.search ? '?' : ''}${url.search ? '...' : ''}`;
+  } catch {
+    return endpoint.length > 72 ? `${endpoint.slice(0, 69)}...` : endpoint;
+  }
+}
+
 function LogsTable({ logs }: { logs: AdminLogEntry[] }) {
   const [selectedLog, setSelectedLog] = useState<AdminLogEntry | null>(logs[0] || null);
+  const [isDetailCollapsed, setIsDetailCollapsed] = useState(false);
 
   useEffect(() => {
     setSelectedLog((current) => current && logs.some((log) => log.id === current.id) ? current : logs[0] || null);
@@ -54,13 +68,29 @@ function LogsTable({ logs }: { logs: AdminLogEntry[] }) {
   }
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)]">
-      <div className="thin-scrollbar max-h-[680px] overflow-auto rounded-2xl border border-gray-200">
+    <div className={`grid gap-5 ${isDetailCollapsed ? 'xl:grid-cols-1' : 'xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)]'}`}>
+      <div>
+        {isDetailCollapsed ? (
+          <div className="mb-3 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setIsDetailCollapsed(false)}
+              title="Show log detail"
+              aria-label="Show log detail"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 shadow-sm transition hover:bg-gray-50 hover:text-gray-950"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+          </div>
+        ) : null}
+        <div className="thin-scrollbar max-h-[680px] overflow-auto rounded-2xl border border-gray-200">
         <table className="min-w-full divide-y divide-gray-200 text-left text-sm">
           <thead className="sticky top-0 bg-gray-50 text-xs uppercase tracking-[0.12em] text-gray-500">
             <tr>
               <th className="px-4 py-3 font-semibold">Time</th>
               <th className="px-4 py-3 font-semibold">Source</th>
+              <th className="px-4 py-3 font-semibold">Meta API</th>
+              <th className="px-4 py-3 font-semibold">Meta feature</th>
               <th className="px-4 py-3 font-semibold">Org ID</th>
               <th className="px-4 py-3 font-semibold">Status</th>
               <th className="px-4 py-3 font-semibold">Error Type</th>
@@ -76,7 +106,22 @@ function LogsTable({ logs }: { logs: AdminLogEntry[] }) {
                 <td className="whitespace-nowrap px-4 py-3 text-xs text-gray-500">{formatDateTime(log.occurredAt)}</td>
                 <td className="px-4 py-3">
                   <p className="font-semibold text-gray-950">{log.source}</p>
-                  <p className="mt-1 max-w-[260px] truncate text-xs text-gray-500">{log.title}</p>
+                  <p className="mt-1 max-w-[260px] truncate text-xs text-gray-500">
+                    {[log.apiMethod, compactApiEndpoint(log) || log.title].filter(Boolean).join(' ')}
+                  </p>
+                </td>
+                <td className="px-4 py-3">
+                  <span
+                    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${
+                      log.isMetaApi ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-600'
+                    }`}
+                  >
+                    {log.isMetaApi ? 'Yes' : 'No'}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  <p className="max-w-[220px] truncate text-xs font-semibold text-gray-700">{log.metaFeatureName || 'N/A'}</p>
+                  {log.metaPermissionName ? <p className="mt-1 max-w-[220px] truncate text-xs text-gray-500">{log.metaPermissionName}</p> : null}
                 </td>
                 <td className="px-4 py-3 font-mono text-xs text-gray-500">{log.orgId || 'global'}</td>
                 <td className="px-4 py-3"><StatusBadge status={log.status} severity={log.severity} compact /></td>
@@ -85,33 +130,55 @@ function LogsTable({ logs }: { logs: AdminLogEntry[] }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
-      <Panel title="Log Detail">
-        {selectedLog ? (
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusBadge status={selectedLog.status} severity={selectedLog.severity} compact />
-              <span className="text-xs text-gray-500">{formatDateTime(selectedLog.occurredAt)}</span>
+      {!isDetailCollapsed ? (
+        <Panel
+          title="Log Detail"
+          action={
+            <button
+              type="button"
+              onClick={() => setIsDetailCollapsed(true)}
+              title="Hide log detail"
+              aria-label="Hide log detail"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 transition hover:bg-gray-50 hover:text-gray-950"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          }
+        >
+          {selectedLog ? (
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusBadge status={selectedLog.status} severity={selectedLog.severity} compact />
+                <span className="text-xs text-gray-500">{formatDateTime(selectedLog.occurredAt)}</span>
+              </div>
+              <h3 className="mt-4 text-base font-semibold text-gray-950">{selectedLog.title}</h3>
+              {selectedLog.detail ? <p className="mt-2 text-sm leading-6 text-gray-500">{selectedLog.detail}</p> : null}
+              <div className="mt-4 grid gap-3 text-xs text-gray-500 sm:grid-cols-2">
+                <span>Source: {selectedLog.source}</span>
+                <span>Provider: {selectedLog.apiProvider || selectedLog.source}</span>
+                <span>Category: {labelize(selectedLog.category)}</span>
+                <span>Meta API: {selectedLog.isMetaApi ? 'Yes' : 'No'}</span>
+                <span>Method: {selectedLog.apiMethod || 'N/A'}</span>
+                <span>Endpoint: {selectedLog.apiEndpoint || 'N/A'}</span>
+                <span>Meta feature: {selectedLog.metaFeatureName || 'N/A'}</span>
+                <span>Meta permission: {selectedLog.metaPermissionName || 'N/A'}</span>
+                <span>Org: {selectedLog.orgId || 'global'}</span>
+                <span>User: {selectedLog.userId || 'N/A'}</span>
+              </div>
+              <pre className="thin-scrollbar mt-5 max-h-[420px] overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-gray-200 bg-gray-950 p-4 text-xs leading-6 text-gray-200">
+                {JSON.stringify(selectedLog.payload || selectedLog, null, 2)}
+              </pre>
             </div>
-            <h3 className="mt-4 text-base font-semibold text-gray-950">{selectedLog.title}</h3>
-            {selectedLog.detail ? <p className="mt-2 text-sm leading-6 text-gray-500">{selectedLog.detail}</p> : null}
-            <div className="mt-4 grid gap-3 text-xs text-gray-500 sm:grid-cols-2">
-              <span>Source: {selectedLog.source}</span>
-              <span>Category: {labelize(selectedLog.category)}</span>
-              <span>Org: {selectedLog.orgId || 'global'}</span>
-              <span>User: {selectedLog.userId || 'N/A'}</span>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
+              Select a log row.
             </div>
-            <pre className="thin-scrollbar mt-5 max-h-[420px] overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-gray-200 bg-gray-950 p-4 text-xs leading-6 text-gray-200">
-              {JSON.stringify(selectedLog.payload || selectedLog, null, 2)}
-            </pre>
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
-            Select a log row.
-          </div>
-        )}
-      </Panel>
+          )}
+        </Panel>
+      ) : null}
     </div>
   );
 }
@@ -250,9 +317,27 @@ export default function LogsMonitoringPage() {
   }, []);
 
   const visibleLogs = useMemo(() => {
-    const orgNeedle = orgSearch.trim().toLowerCase();
+    const needle = orgSearch.trim().toLowerCase();
     return logRowsForTab(logs, activeTab).filter((log) => {
-      const orgMatches = !orgNeedle || String(log.orgId || '').toLowerCase().includes(orgNeedle);
+      const haystack = [
+        log.orgId,
+        log.userId,
+        log.source,
+        log.title,
+        log.status,
+        log.errorType,
+        log.detail,
+        log.apiProvider,
+        log.apiEndpoint,
+        log.apiMethod,
+        log.metaFeatureName,
+        log.metaPermissionName,
+        log.isMetaApi ? 'meta api' : 'non meta api',
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      const orgMatches = !needle || haystack.includes(needle);
       const errorMatches = errorType === 'all' || log.errorType === errorType;
       return orgMatches && errorMatches;
     });
@@ -315,7 +400,7 @@ export default function LogsMonitoringPage() {
                 value={orgSearch}
                 onChange={(event) => setOrgSearch(event.target.value)}
                 className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 pl-12 text-sm outline-none transition focus:border-[#5b45ff] focus:ring-1 focus:ring-[#5b45ff]"
-                placeholder="Search logs by org_id"
+                placeholder="Search org, source, endpoint, Meta feature, permission..."
               />
             </label>
             <select

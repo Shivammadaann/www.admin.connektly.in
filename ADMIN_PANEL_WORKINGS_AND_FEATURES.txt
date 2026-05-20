@@ -53,7 +53,8 @@ Server-only environment variables:
 - ADMIN_ALLOWED_USER_IDS, legacy allowlist
 - PRIMARY_OWNER_EMAIL, defaults to admin@connektly.in
 - ADMIN_INVITE_REDIRECT_URL, optional redirect for invited admins
-- CLIENT_API_BASE_URL, optional client-app health and webhook URL base
+- CLIENT_API_BASE_URL, optional client-app API and webhook URL base
+- CLIENT_API_HEALTH_URL, optional explicit client-app health check endpoint
 - OWNER_PROFILE_BUCKET, defaults to owner-admin-profile-pictures
 - META_GRAPH_VERSION, defaults to v24.0
 - META_WEBHOOK_VERIFY_TOKEN
@@ -469,8 +470,8 @@ Metrics:
 - Failed email campaigns.
 
 Client API Signal:
-- Displays raw CLIENT_API_BASE_URL /health check response when configured.
-- Shows empty-state guidance when CLIENT_API_BASE_URL is not configured.
+- Displays raw CLIENT_API_HEALTH_URL response when configured.
+- Shows empty-state guidance when CLIENT_API_HEALTH_URL is not configured.
 
 Backend working:
 - buildGlobalIntegrations calculates healthy/degraded/not-configured status from channel status fields and email campaign failures.
@@ -790,7 +791,7 @@ Storage:
 - owner-admin-profile-pictures
 
 External checks/integrations:
-- CLIENT_API_BASE_URL /health
+- CLIENT_API_HEALTH_URL, with fallback to CLIENT_API_BASE_URL /health
 - Meta Graph API for WhatsApp webhook subscription and phone verification code actions
 - Razorpay API for payment method enrichment when credentials are configured
 
@@ -838,7 +839,7 @@ Safety checks:
 - Logs & Monitoring is the currently routed home for webhooks, server status, and audit views.
 - The header search input is visual only in AdminLayout; it is not wired to global search behavior in the current code.
 - Turnstile support exists on login, with local/production site key handling in src/lib/config.ts.
-- CLIENT_API_BASE_URL is optional, but without it the client API health and generated webhook URL references are limited.
+- CLIENT_API_BASE_URL is optional for generated webhook URL references. CLIENT_API_HEALTH_URL controls external client API monitoring.
 
 
 23. QUICK FILE MAP

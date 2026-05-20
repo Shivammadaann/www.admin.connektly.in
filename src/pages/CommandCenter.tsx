@@ -2,21 +2,26 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
+  Bell,
   Building2,
+  CheckCircle2,
+  Clock3,
   CreditCard,
   IndianRupee,
   Loader2,
   MessageSquare,
   RefreshCcw,
+  Rocket,
   ScrollText,
   TrendingDown,
   TrendingUp,
+  UserPlus,
   Users,
   Webhook,
 } from 'lucide-react';
 import { adminApi } from '../lib/adminApi';
-import { formatCurrency, formatDateTime, formatNumber } from '../lib/format';
-import type { AdminOverview, Severity } from '../lib/types';
+import { formatCurrency, formatDateTime, formatNumber, labelize } from '../lib/format';
+import type { AdminOverview, AdminUserActivityNotification, Severity } from '../lib/types';
 import Panel from '../components/Panel';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
@@ -149,6 +154,81 @@ function alertTone(severity: Severity) {
   if (severity === 'warning') return 'border-amber-200 bg-amber-50 text-amber-700';
   if (severity === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
   return 'border-slate-200 bg-slate-50 text-slate-700';
+}
+
+function userActivityIcon(type: AdminUserActivityNotification['type']) {
+  if (type === 'signup') return UserPlus;
+  if (type === 'onboarding') return Rocket;
+  if (type === 'trial_expired') return Clock3;
+  if (type === 'payment') return CreditCard;
+  return Bell;
+}
+
+function userActivityTone(severity: Severity) {
+  if (severity === 'success') return 'border-emerald-100 bg-emerald-50 text-emerald-700';
+  if (severity === 'warning') return 'border-amber-100 bg-amber-50 text-amber-700';
+  if (severity === 'critical') return 'border-rose-100 bg-rose-50 text-rose-700';
+  return 'border-sky-100 bg-sky-50 text-sky-700';
+}
+
+function UserActivityPanel({ activity }: { activity: AdminUserActivityNotification[] }) {
+  return (
+    <Panel title="User Activity Notifications" description="User signups, onboarding, trial, and payment events.">
+      <div className="thin-scrollbar max-h-[520px] space-y-3 overflow-y-auto pr-1">
+        {activity.length ? (
+          activity.map((item) => {
+            const Icon = userActivityIcon(item.type);
+            const amount = typeof item.metadata.amount === 'number' && item.metadata.amount > 0 ? formatCurrency(item.metadata.amount) : null;
+            return (
+              <article key={item.id} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                <div className="flex items-start gap-3">
+                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border ${userActivityTone(item.severity)}`}>
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-gray-950">{item.title}</p>
+                        <p className="mt-1 text-xs text-gray-500">{formatDateTime(item.occurredAt)}</p>
+                      </div>
+                      <StatusBadge status={item.status} severity={item.severity} compact />
+                    </div>
+
+                    <p className="mt-3 text-sm font-semibold text-gray-900">{item.user.fullName}</p>
+                    <div className="mt-1 grid gap-1 text-xs text-gray-500">
+                      <span className="truncate">{item.user.email || 'No email recorded'}</span>
+                      <span className="truncate">{item.user.companyName || 'No company'} - {labelize(item.user.selectedPlan || 'no plan')}</span>
+                      <span className="truncate">{labelize(item.user.billingStatus || 'no billing status')} - {item.user.phone || 'No phone'}</span>
+                    </div>
+
+                    {item.type === 'payment' || item.type === 'trial_expired' || item.type === 'onboarding' ? (
+                      <div className="mt-3 grid gap-2 text-xs text-gray-600 sm:grid-cols-2">
+                        {amount ? <span className="font-semibold text-gray-900">Amount: {amount}</span> : null}
+                        {item.metadata.reference ? <span className="truncate font-mono text-gray-500">{item.metadata.reference}</span> : null}
+                        {item.user.trialEndsAt ? <span>Trial: {formatDateTime(item.user.trialEndsAt)}</span> : null}
+                        {item.user.onboardingCompleted ? <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" />Onboarded</span> : null}
+                      </div>
+                    ) : null}
+
+                    <Link
+                      to="/dashboard/users"
+                      className="mt-3 inline-flex text-xs font-bold text-[#5b45ff] transition hover:text-[#3f2bd8]"
+                    >
+                      Open user directory
+                    </Link>
+                  </div>
+                </div>
+              </article>
+            );
+          })
+        ) : (
+          <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
+            No user activity notifications found.
+          </div>
+        )}
+      </div>
+    </Panel>
+  );
 }
 
 export default function CommandCenter() {
@@ -307,6 +387,8 @@ export default function CommandCenter() {
                   ))}
                 </div>
               </Panel>
+
+              <UserActivityPanel activity={overview.userActivity || []} />
 
               <Panel title="Quick Actions">
                 <div className="grid gap-2">

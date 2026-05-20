@@ -217,6 +217,37 @@ export type AdminUserRow = {
   isBanned: boolean;
 };
 
+export type AdminUserActivityNotification = {
+  id: string;
+  type: 'signup' | 'onboarding' | 'trial_expired' | 'payment';
+  title: string;
+  occurredAt: string;
+  severity: Severity;
+  status: string;
+  description: string;
+  user: {
+    userId: string | null;
+    fullName: string;
+    email: string | null;
+    companyName: string | null;
+    phone: string | null;
+    selectedPlan: string | null;
+    billingCycle: string | null;
+    billingStatus: string | null;
+    trialEndsAt: string | null;
+    onboardingCompleted: boolean;
+  };
+  metadata: {
+    amount?: number;
+    currency?: string;
+    reference?: string | null;
+    channels?: number;
+    lastSignInAt?: string | null;
+    trialEndsAt?: string | null;
+    completedAt?: string | null;
+  };
+};
+
 export type AdminOverview = {
   generatedAt: string;
   metrics: {
@@ -255,6 +286,7 @@ export type AdminOverview = {
   planBreakdown: Record<string, number>;
   health: SystemHealth;
   timeline: AdminLiveEvent[];
+  userActivity: AdminUserActivityNotification[];
   recentUsers: AdminUserRow[];
   warnings: string[];
 };
@@ -272,6 +304,12 @@ export type AdminLogEntry = {
   severity: Severity;
   detail: string | null;
   payload: unknown;
+  isMetaApi?: boolean;
+  apiProvider?: string | null;
+  apiEndpoint?: string | null;
+  apiMethod?: string | null;
+  metaFeatureName?: string | null;
+  metaPermissionName?: string | null;
 };
 
 export type LogsMonitoringResponse = {

@@ -110,7 +110,7 @@ export default function GlobalIntegrationsPage() {
               </pre>
             ) : (
               <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
-                CLIENT_API_BASE_URL is not configured, so external client API health is not available.
+                CLIENT_API_HEALTH_URL is not configured, so external client API health is not available.
               </div>
             )}
           </Panel>
