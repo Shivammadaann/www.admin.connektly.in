@@ -117,6 +117,8 @@ export default function OrganizationsPage() {
       | 'deactivate_webhook'
       | 'unsubscribe_webhook'
       | 'disconnect_waba'
+      | 'disconnect_messenger'
+      | 'disconnect_instagram'
       | 'request_phone_code',
     payload: Record<string, unknown> = {},
     orgIdOverride?: string,
@@ -126,6 +128,8 @@ export default function OrganizationsPage() {
     if (action === 'delete' && !window.confirm('Soft delete this organization by marking it deleted?')) return;
     if (action === 'unsubscribe_webhook' && !window.confirm('Unsubscribe WhatsApp webhooks for this organization?')) return;
     if (action === 'disconnect_waba' && !window.confirm('Disconnect this organization WABA account and remove its WhatsApp templates from the admin database?')) return;
+    if (action === 'disconnect_messenger' && !window.confirm('Disconnect this organization Messenger channel?')) return;
+    if (action === 'disconnect_instagram' && !window.confirm('Disconnect this organization Instagram channel?')) return;
 
     try {
       setActionLoading(action);
@@ -639,6 +643,47 @@ export default function OrganizationsPage() {
                   <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
                     No WhatsApp Business number is linked through Embedded Sign Up for this organization.
                   </div>
+                )}
+              </Panel>
+
+              <Panel title="Social Channels" description="Messenger and Instagram channel controls">
+                {selectedOrganization ? (
+                  <div className="space-y-4">
+                    {selectedOrganization.channels.some(c => c.type === 'Messenger' || c.type === 'Facebook' || c.type === 'Instagram') ? (
+                      <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {selectedOrganization.channels.some(c => c.type === 'Messenger' || c.type === 'Facebook') && (
+                            <button
+                              type="button"
+                              disabled={Boolean(actionLoading)}
+                              onClick={() => void runAction('disconnect_messenger')}
+                              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Disconnect Messenger
+                            </button>
+                          )}
+                          {selectedOrganization.channels.some(c => c.type === 'Instagram') && (
+                            <button
+                              type="button"
+                              disabled={Boolean(actionLoading)}
+                              onClick={() => void runAction('disconnect_instagram')}
+                              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Disconnect Instagram
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
+                        No Messenger or Instagram channels are linked for this organization.
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-sm text-gray-500">Select an organization to manage social channels.</div>
                 )}
               </Panel>
             </div>

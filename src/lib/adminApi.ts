@@ -238,6 +238,8 @@ export const adminApi = {
         | 'deactivate_webhook'
         | 'unsubscribe_webhook'
         | 'disconnect_waba'
+        | 'disconnect_messenger'
+        | 'disconnect_instagram'
         | 'request_phone_code';
       selectedPlan?: string;
       billingCycle?: string;
