@@ -6218,6 +6218,18 @@ app.post('/api/admin/organizations/:orgId/action', requireAdmin, requireAdminPer
         throw channelError;
       }
       await recordAdminAudit(req.admin, 'WHATSAPP_DISCONNECT_WABA', orgId);
+    } else if (action === 'disconnect_messenger') {
+      const { error: channelError } = await adminSupabase.from('messenger_channels').delete().eq('user_id', orgId);
+      if (channelError) {
+        throw channelError;
+      }
+      await recordAdminAudit(req.admin, 'MESSENGER_DISCONNECT', orgId);
+    } else if (action === 'disconnect_instagram') {
+      const { error: channelError } = await adminSupabase.from('instagram_channels').delete().eq('user_id', orgId);
+      if (channelError) {
+        throw channelError;
+      }
+      await recordAdminAudit(req.admin, 'INSTAGRAM_DISCONNECT', orgId);
     } else if (action === 'request_phone_code') {
       const codeMethod = String(req.body.codeMethod || '').toUpperCase() === 'VOICE' ? 'VOICE' : 'SMS';
       const language = normalizeString(req.body.language) || 'en_US';
