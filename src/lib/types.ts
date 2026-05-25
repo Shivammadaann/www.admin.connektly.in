@@ -347,6 +347,8 @@ export type AdminOrganizationRow = {
   ownerEmail: string | null;
   plan: string;
   billingCycle: string | null;
+  billingStatus: string | null;
+  trialEndsAt: string | null;
   userCount: number;
   status: string;
   revenue: number;

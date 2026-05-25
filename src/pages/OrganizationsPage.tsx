@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ArrowLeft,
   Ban,
   Building2,
+  CalendarClock,
+  CheckCircle2,
   CreditCard,
   ExternalLink,
+  Instagram,
   Loader2,
   LogIn,
   MessageCircle,
+  MessagesSquare,
   RefreshCcw,
   ShieldAlert,
   Smartphone,
@@ -16,7 +21,7 @@ import {
   Webhook,
 } from 'lucide-react';
 import { adminApi } from '../lib/adminApi';
-import type { AdminOrganizationDetail, AdminOrganizationsResponse } from '../lib/types';
+import type { AdminOrganizationDetail, AdminOrganizationRow, AdminOrganizationsResponse } from '../lib/types';
 import { formatCurrency, formatDateTime, formatNumber, labelize } from '../lib/format';
 import LiveEventFeed from '../components/LiveEventFeed';
 import MetricCard from '../components/MetricCard';
@@ -42,15 +47,59 @@ function planRank(plan: string) {
   return index === -1 ? 0 : index;
 }
 
+function channelKey(type: string) {
+  const value = type.toLowerCase();
+  if (value.includes('whatsapp')) return 'whatsapp';
+  if (value.includes('instagram')) return 'instagram';
+  if (value.includes('messenger') || value.includes('facebook')) return 'messenger';
+  return value || 'channel';
+}
+
+function channelLabel(type: string) {
+  const key = channelKey(type);
+  if (key === 'whatsapp') return 'WhatsApp';
+  if (key === 'instagram') return 'Instagram';
+  if (key === 'messenger') return 'Messenger';
+  return labelize(type);
+}
+
+function channelStatusText(status: unknown) {
+  if (typeof status === 'string') return status || 'connected';
+  if (status && typeof status === 'object' && 'status' in status) return String((status as { status?: unknown }).status || 'connected');
+  return status ? 'connected' : 'connected';
+}
+
+function channelIcon(type: string) {
+  const key = channelKey(type);
+  if (key === 'instagram') return Instagram;
+  if (key === 'messenger') return MessagesSquare;
+  return MessageCircle;
+}
+
+function channelSubtitle(organization: AdminOrganizationRow, type: string) {
+  const key = channelKey(type);
+  if (key === 'whatsapp' && organization.whatsapp) {
+    return organization.whatsapp.displayPhoneNumber || organization.whatsapp.phoneNumberId || 'WhatsApp Business number';
+  }
+  if (key === 'instagram') return 'Instagram messaging channel';
+  if (key === 'messenger') return 'Facebook page messaging channel';
+  return 'Connected channel';
+}
+
 export default function OrganizationsPage() {
   const [data, setData] = useState<AdminOrganizationsResponse | null>(null);
   const [detail, setDetail] = useState<AdminOrganizationDetail | null>(null);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [manageOrgId, setManageOrgId] = useState<string | null>(null);
+  const [viewDetailsOrgId, setViewDetailsOrgId] = useState<string | null>(null);
+  const [eventLogsOrgId, setEventLogsOrgId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
   const [plan, setPlan] = useState('all');
   const [planDraft, setPlanDraft] = useState('growth');
+  const [billingCycleDraft, setBillingCycleDraft] = useState('monthly');
+  const [trialEndsDraft, setTrialEndsDraft] = useState('');
+  const [activeChannelType, setActiveChannelType] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -58,6 +107,8 @@ export default function OrganizationsPage() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const selectedOrganization = data?.organizations.find((organization) => organization.orgId === selectedOrgId) || null;
+  const activeDetailOrgId = manageOrgId || viewDetailsOrgId || eventLogsOrgId;
+  const activeChannel = selectedOrganization?.channels.find((channel) => channelKey(channel.type) === activeChannelType) || null;
 
   const loadOrganizations = async (showLoader = true) => {
     try {
@@ -83,6 +134,8 @@ export default function OrganizationsPage() {
       const response = await adminApi.getOrganization(orgId);
       setDetail(response);
       setPlanDraft(response.organization.plan === 'none' ? 'starter' : response.organization.plan);
+      setBillingCycleDraft(response.organization.billingCycle || 'monthly');
+      setTrialEndsDraft(response.organization.trialEndsAt ? response.organization.trialEndsAt.slice(0, 10) : '');
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Failed to load organization detail.');
     } finally {
@@ -95,13 +148,13 @@ export default function OrganizationsPage() {
   }, []);
 
   useEffect(() => {
-    if (manageOrgId) {
-      setSelectedOrgId(manageOrgId);
-      void loadDetail(manageOrgId);
+    if (activeDetailOrgId) {
+      setSelectedOrgId(activeDetailOrgId);
+      void loadDetail(activeDetailOrgId);
     } else {
       setDetail(null);
     }
-  }, [manageOrgId]);
+  }, [activeDetailOrgId]);
 
   const runAction = async (
     action:
@@ -143,6 +196,8 @@ export default function OrganizationsPage() {
       if (response.detail) {
         setDetail(response.detail);
         setPlanDraft(response.detail.organization.plan === 'none' ? 'starter' : response.detail.organization.plan);
+        setBillingCycleDraft(response.detail.organization.billingCycle || 'monthly');
+        setTrialEndsDraft(response.detail.organization.trialEndsAt ? response.detail.organization.trialEndsAt.slice(0, 10) : '');
       }
 
       if (response.impersonation) {
@@ -172,6 +227,17 @@ export default function OrganizationsPage() {
   const openManageModal = (orgId: string) => {
     setSelectedOrgId(orgId);
     setManageOrgId(orgId);
+    setActiveChannelType(null);
+  };
+
+  const openViewDetailsModal = (orgId: string) => {
+    setSelectedOrgId(orgId);
+    setViewDetailsOrgId(orgId);
+  };
+
+  const openEventLogsModal = (orgId: string) => {
+    setSelectedOrgId(orgId);
+    setEventLogsOrgId(orgId);
   };
 
   if (isLoading && !data) {
@@ -264,18 +330,15 @@ export default function OrganizationsPage() {
               </div>
             ) : (
               <div className="thin-scrollbar overflow-x-auto rounded-2xl border border-gray-200">
-                <table className="min-w-[1120px] w-full border-collapse text-left text-sm">
+                <table className="min-w-[960px] w-full border-collapse text-left text-sm">
                   <thead className="sticky top-0 z-10 bg-gray-50 text-xs uppercase tracking-[0.16em] text-gray-500">
                     <tr>
                       <th className="px-4 py-3 font-semibold">Org Name</th>
-                      <th className="px-4 py-3 font-semibold">Website</th>
                       <th className="px-4 py-3 font-semibold">WhatsApp</th>
                       <th className="px-4 py-3 font-semibold">Message Tier</th>
                       <th className="px-4 py-3 font-semibold">Plan</th>
                       <th className="px-4 py-3 font-semibold">Users</th>
                       <th className="px-4 py-3 font-semibold">Status</th>
-                      <th className="px-4 py-3 font-semibold">Revenue</th>
-                      <th className="px-4 py-3 font-semibold">Created</th>
                       <th className="px-4 py-3 font-semibold">Actions</th>
                     </tr>
                   </thead>
@@ -288,21 +351,6 @@ export default function OrganizationsPage() {
                               <span className="block truncate font-semibold text-gray-950">{organization.orgName}</span>
                               <span className="mt-1 block truncate text-xs text-gray-500">{organization.ownerEmail || organization.ownerUserId}</span>
                             </div>
-                          </td>
-                          <td className="px-4 py-4">
-                            {organization.companyWebsite ? (
-                              <a
-                                href={organization.companyWebsite.startsWith('http') ? organization.companyWebsite : `https://${organization.companyWebsite}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex max-w-[180px] items-center gap-1 truncate text-xs font-semibold text-[#5b45ff] hover:underline"
-                              >
-                                <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-                                <span className="truncate">{organization.companyWebsite}</span>
-                              </a>
-                            ) : (
-                              <span className="text-xs text-gray-400">Not set</span>
-                            )}
                           </td>
                           <td className="px-4 py-4">
                             <div className="max-w-[180px]">
@@ -330,16 +378,30 @@ export default function OrganizationsPage() {
                               ) : null}
                             </div>
                           </td>
-                          <td className="px-4 py-4 font-semibold text-gray-950">{formatCurrency(organization.revenue)}</td>
-                          <td className="px-4 py-4 text-xs text-gray-500">{formatDateTime(organization.createdAt)}</td>
                           <td className="px-4 py-4">
-                            <button
-                              type="button"
-                              onClick={() => openManageModal(organization.orgId)}
-                              className="rounded-xl bg-[#111827] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#1f2937]"
-                            >
-                              Manage
-                            </button>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openManageModal(organization.orgId)}
+                                className="rounded-xl bg-[#111827] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#1f2937]"
+                              >
+                                Manage
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openViewDetailsModal(organization.orgId)}
+                                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 transition hover:bg-gray-50"
+                              >
+                                View Details
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openEventLogsModal(organization.orgId)}
+                                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 transition hover:bg-gray-50"
+                              >
+                                Event Logs
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -352,131 +414,31 @@ export default function OrganizationsPage() {
 
           <Modal
             title="Manage Organization"
-            description={selectedOrganization?.orgName || 'Organization controls and detail view'}
+            description={selectedOrganization?.orgName || 'Organization controls'}
             isOpen={Boolean(manageOrgId)}
-            onClose={() => setManageOrgId(null)}
+            onClose={() => {
+              setManageOrgId(null);
+              setActiveChannelType(null);
+            }}
           >
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
             <div className="space-y-6">
-              <Panel title="Organization actions" description={selectedOrganization?.orgName || 'Select an organization'}>
-                {selectedOrganization ? (
-                  <div className="space-y-4">
-                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                      <p className="text-sm font-semibold text-gray-950">{selectedOrganization.ownerName}</p>
-                      <p className="mt-1 truncate text-xs text-gray-500">{selectedOrganization.ownerEmail || selectedOrganization.ownerUserId}</p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {selectedOrganization.channels.length ? (
-                          selectedOrganization.channels.map((channel) => (
-                            <span key={`${selectedOrganization.orgId}-${channel.type}`} className="rounded-full border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-600">
-                              {channel.type}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-xs text-gray-400">No connected channels</span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <button
-                        type="button"
-                        disabled={Boolean(actionLoading)}
-                        onClick={() => void runAction('impersonate')}
-                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-60"
-                      >
-                        <LogIn className="h-4 w-4" />
-                        Impersonate login
-                      </button>
-                      <button
-                        type="button"
-                        disabled={Boolean(actionLoading)}
-                        onClick={() => void runAction(selectedOrganization.status.toLowerCase() === 'suspended' ? 'activate' : 'suspend')}
-                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-60"
-                      >
-                        <ExternalLink className="h-4 w-4" />
-                        {selectedOrganization.status.toLowerCase() === 'suspended' ? 'Activate org' : 'Suspend org'}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={Boolean(actionLoading)}
-                        onClick={() => void runAction(selectedOrganization.isBanned ? 'unban' : 'ban')}
-                        className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#111827] px-4 py-3 text-sm font-semibold text-white hover:bg-[#1f2937] disabled:opacity-60"
-                      >
-                        <Ban className="h-4 w-4" />
-                        {selectedOrganization.isBanned ? 'Unban org' : 'Ban org'}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={Boolean(actionLoading)}
-                        onClick={() => void runAction('delete')}
-                        className="inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                        Delete org
-                      </button>
-                    </div>
-
-                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Plan control</span>
-                      <div className="flex flex-col gap-3 sm:flex-row">
-                        <select
-                          value={planDraft}
-                          onChange={(event) => setPlanDraft(event.target.value)}
-                          className="min-w-0 flex-1 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none"
-                        >
-                          {planOptions.map((item) => (
-                            <option key={item} value={item}>
-                              {labelize(item)}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          disabled={Boolean(actionLoading)}
-                          onClick={() =>
-                            void runAction('update_plan', {
-                              selectedPlan: planDraft,
-                              billingStatus: 'active',
-                            })
-                          }
-                          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#5b45ff] px-4 py-3 text-sm font-semibold text-white hover:bg-[#4c38e0] disabled:opacity-60"
-                        >
-                          <TrendingUp className="h-4 w-4" />
-                          {planDirection}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
-                    Select an organization to manage actions.
-                  </div>
-                )}
-              </Panel>
-
-              <Panel title="Risk and abuse signals">
-                {selectedOrganization ? (
-                  selectedOrganization.riskFlags.length ? (
-                    <div className="space-y-3">
-                      {selectedOrganization.riskFlags.map((flag) => (
-                        <div key={flag} className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-                          {flag}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                      No risk flags detected for this organization.
-                    </div>
-                  )
-                ) : (
-                  <div className="text-sm text-gray-500">Select an organization to review risk signals.</div>
-                )}
-              </Panel>
-
-              <Panel title="WhatsApp Business Number" description="Admin-only Meta channel details and webhook controls">
-                {selectedOrganization?.whatsapp ? (
-                  <div className="space-y-4">
+              {activeChannel && selectedOrganization ? (
+                <Panel
+                  title={`${channelLabel(activeChannel.type)} Channel`}
+                  description={channelSubtitle(selectedOrganization, activeChannel.type)}
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => setActiveChannelType(null)}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                      Back
+                    </button>
+                  }
+                >
+                  {channelKey(activeChannel.type) === 'whatsapp' && selectedOrganization.whatsapp ? (
+                    <div className="space-y-4">
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
@@ -638,57 +600,220 @@ export default function OrganizationsPage() {
                         <span>Access token: {selectedOrganization.whatsapp.accessTokenLast4 ? `...${selectedOrganization.whatsapp.accessTokenLast4}` : 'Not available'}</span>
                       </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
-                    No WhatsApp Business number is linked through Embedded Sign Up for this organization.
-                  </div>
-                )}
-              </Panel>
-
-              <Panel title="Social Channels" description="Messenger and Instagram channel controls">
-                {selectedOrganization ? (
-                  <div className="space-y-4">
-                    {selectedOrganization.channels.some(c => c.type === 'Messenger' || c.type === 'Facebook' || c.type === 'Instagram') ? (
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
                       <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          {selectedOrganization.channels.some(c => c.type === 'Messenger' || c.type === 'Facebook') && (
-                            <button
-                              type="button"
-                              disabled={Boolean(actionLoading)}
-                              onClick={() => void runAction('disconnect_messenger')}
-                              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              Disconnect Messenger
-                            </button>
-                          )}
-                          {selectedOrganization.channels.some(c => c.type === 'Instagram') && (
-                            <button
-                              type="button"
-                              disabled={Boolean(actionLoading)}
-                              onClick={() => void runAction('disconnect_instagram')}
-                              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              Disconnect Instagram
-                            </button>
-                          )}
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-gray-950">{channelLabel(activeChannel.type)}</p>
+                            <p className="mt-1 text-xs text-gray-500">{channelSubtitle(selectedOrganization, activeChannel.type)}</p>
+                          </div>
+                          <StatusBadge status={channelStatusText(activeChannel.status)} severity="success" compact />
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={Boolean(actionLoading)}
+                        onClick={() => void runAction(channelKey(activeChannel.type) === 'instagram' ? 'disconnect_instagram' : 'disconnect_messenger')}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Disconnect {channelLabel(activeChannel.type)}
+                      </button>
+                    </div>
+                  )}
+                </Panel>
+              ) : (
+                <>
+                  <Panel title="Organization actions" description={selectedOrganization?.orgName || 'Select an organization'}>
+                    {selectedOrganization ? (
+                      <div className="space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-gray-950">{selectedOrganization.ownerName}</p>
+                            <p className="mt-1 truncate text-xs text-gray-500">{selectedOrganization.ownerEmail || selectedOrganization.ownerUserId}</p>
+                          </div>
+                          <StatusBadge status={selectedOrganization.status} severity={statusSeverity(selectedOrganization.status)} compact />
+                        </div>
+
+                        <div className="grid gap-2 sm:grid-cols-4">
+                          <button type="button" disabled={Boolean(actionLoading)} onClick={() => void runAction('impersonate')} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-60">
+                            <LogIn className="h-4 w-4" />
+                            Login
+                          </button>
+                          <button type="button" disabled={Boolean(actionLoading)} onClick={() => void runAction(selectedOrganization.status.toLowerCase() === 'suspended' ? 'activate' : 'suspend')} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-60">
+                            <ExternalLink className="h-4 w-4" />
+                            {selectedOrganization.status.toLowerCase() === 'suspended' ? 'Activate' : 'Suspend'}
+                          </button>
+                          <button type="button" disabled={Boolean(actionLoading)} onClick={() => void runAction(selectedOrganization.isBanned ? 'unban' : 'ban')} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#111827] px-3 py-2 text-xs font-semibold text-white hover:bg-[#1f2937] disabled:opacity-60">
+                            <Ban className="h-4 w-4" />
+                            {selectedOrganization.isBanned ? 'Unban' : 'Ban'}
+                          </button>
+                          <button type="button" disabled={Boolean(actionLoading)} onClick={() => void runAction('delete')} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-60">
+                            <Trash2 className="h-4 w-4" />
+                            Delete
+                          </button>
                         </div>
                       </div>
                     ) : (
                       <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
-                        No Messenger or Instagram channels are linked for this organization.
+                        Select an organization to manage actions.
                       </div>
                     )}
+                  </Panel>
+
+                  <Panel title="Main app plan" description="Current subscribed plan and admin billing actions">
+                    {selectedOrganization ? (
+                      <div className="space-y-4">
+                        <div className="grid gap-3 sm:grid-cols-4">
+                          <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500">Plan</p>
+                            <p className="mt-2 truncate text-sm font-semibold text-gray-950">{labelize(selectedOrganization.plan || 'none')}</p>
+                          </div>
+                          <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500">Billing</p>
+                            <p className="mt-2 truncate text-sm font-semibold text-gray-950">{labelize(selectedOrganization.billingStatus || selectedOrganization.status)}</p>
+                          </div>
+                          <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500">Cycle</p>
+                            <p className="mt-2 truncate text-sm font-semibold text-gray-950">{labelize(selectedOrganization.billingCycle || 'no cycle')}</p>
+                          </div>
+                          <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500">Trial ends</p>
+                            <p className="mt-2 truncate text-sm font-semibold text-gray-950">{formatDateTime(selectedOrganization.trialEndsAt)}</p>
+                          </div>
+                        </div>
+                        <div className="grid gap-3 lg:grid-cols-[1fr_160px_160px]">
+                          <select value={planDraft} onChange={(event) => setPlanDraft(event.target.value)} className="min-w-0 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none">
+                            {planOptions.map((item) => (
+                              <option key={item} value={item}>{labelize(item)}</option>
+                            ))}
+                          </select>
+                          <select value={billingCycleDraft} onChange={(event) => setBillingCycleDraft(event.target.value)} className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none">
+                            <option value="monthly">Monthly</option>
+                            <option value="annual">Annual</option>
+                            <option value="manual">Manual</option>
+                          </select>
+                          <input type="date" value={trialEndsDraft} onChange={(event) => setTrialEndsDraft(event.target.value)} className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none" />
+                        </div>
+                        <div className="grid gap-2 sm:grid-cols-4">
+                          <button type="button" disabled={Boolean(actionLoading)} onClick={() => void runAction('update_plan', { selectedPlan: planDraft, billingCycle: billingCycleDraft, billingStatus: 'active', trialEndsAt: trialEndsDraft ? new Date(trialEndsDraft).toISOString() : selectedOrganization.trialEndsAt })} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#5b45ff] px-3 py-2 text-xs font-semibold text-white hover:bg-[#4c38e0] disabled:opacity-60">
+                            <TrendingUp className="h-4 w-4" />
+                            {planDirection}
+                          </button>
+                          <button type="button" disabled={Boolean(actionLoading)} onClick={() => void runAction('update_plan', { selectedPlan: planDraft, billingCycle: billingCycleDraft, billingStatus: 'trialing', trialEndsAt: trialEndsDraft ? new Date(trialEndsDraft).toISOString() : new Date(Date.now() + 14 * 86400000).toISOString() })} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:opacity-60">
+                            <CalendarClock className="h-4 w-4" />
+                            Extend trial
+                          </button>
+                          <button type="button" disabled={Boolean(actionLoading)} onClick={() => void runAction('update_plan', { selectedPlan: planDraft, billingCycle: billingCycleDraft, billingStatus: 'active', trialEndsAt: null })} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-60">
+                            <CheckCircle2 className="h-4 w-4" />
+                            Mark active
+                          </button>
+                          <button type="button" disabled={Boolean(actionLoading)} onClick={() => void runAction('update_plan', { selectedPlan: planDraft, billingCycle: billingCycleDraft, billingStatus: 'past_due', trialEndsAt: selectedOrganization.trialEndsAt })} className="inline-flex items-center justify-center rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-60">
+                            Mark past due
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-sm text-gray-500">Select an organization to manage plan state.</div>
+                    )}
+                  </Panel>
+
+                  <Panel title="Connected Channels" description="Open a channel to manage connection details">
+                    {selectedOrganization?.channels.length ? (
+                      <div className="divide-y divide-gray-100 rounded-2xl border border-gray-200 bg-white">
+                        {selectedOrganization.channels.map((channel) => {
+                          const Icon = channelIcon(channel.type);
+                          return (
+                            <button key={`${selectedOrganization.orgId}-${channel.type}`} type="button" onClick={() => setActiveChannelType(channelKey(channel.type))} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-gray-50">
+                              <span className="flex min-w-0 items-center gap-3">
+                                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-gray-100 text-gray-700">
+                                  <Icon className="h-4 w-4" />
+                                </span>
+                                <span className="min-w-0">
+                                  <span className="block truncate text-sm font-semibold text-gray-950">{channelLabel(channel.type)}</span>
+                                  <span className="mt-1 block truncate text-xs text-gray-500">{channelSubtitle(selectedOrganization, channel.type)}</span>
+                                </span>
+                              </span>
+                              <StatusBadge status={channelStatusText(channel.status)} severity="success" compact />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
+                        No connected channels found for this organization.
+                      </div>
+                    )}
+                  </Panel>
+
+                  <Panel title="Risk and abuse signals">
+                    {selectedOrganization ? (
+                      selectedOrganization.riskFlags.length ? (
+                        <div className="space-y-3">
+                          {selectedOrganization.riskFlags.map((flag) => (
+                            <div key={flag} className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                              {flag}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                          No risk flags detected for this organization.
+                        </div>
+                      )
+                    ) : (
+                      <div className="text-sm text-gray-500">Select an organization to review risk signals.</div>
+                    )}
+                  </Panel>
+                </>
+              )}
+            </div>
+          </Modal>
+
+          <Modal
+            title="View Details"
+            description={selectedOrganization?.orgName || 'Organization detail view'}
+            isOpen={Boolean(viewDetailsOrgId)}
+            onClose={() => setViewDetailsOrgId(null)}
+          >
+            <div className="space-y-6">
+              <Panel title="Organization profile">
+                {selectedOrganization ? (
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Website</p>
+                      {selectedOrganization.companyWebsite ? (
+                        <a
+                          href={selectedOrganization.companyWebsite.startsWith('http') ? selectedOrganization.companyWebsite : `https://${selectedOrganization.companyWebsite}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-2 inline-flex max-w-full items-center gap-1 truncate text-sm font-semibold text-[#5b45ff] hover:underline"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">{selectedOrganization.companyWebsite}</span>
+                        </a>
+                      ) : (
+                        <p className="mt-2 text-sm font-semibold text-gray-950">Not set</p>
+                      )}
+                    </div>
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Revenue</p>
+                      <p className="mt-2 text-xl font-semibold text-gray-950">{formatCurrency(selectedOrganization.revenue)}</p>
+                    </div>
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Created</p>
+                      <p className="mt-2 text-sm font-semibold text-gray-950">{formatDateTime(selectedOrganization.createdAt)}</p>
+                    </div>
                   </div>
                 ) : (
-                  <div className="text-sm text-gray-500">Select an organization to manage social channels.</div>
+                  <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
+                    Select an organization to view profile details.
+                  </div>
                 )}
               </Panel>
-            </div>
 
-            <div className="space-y-6">
               <Panel title="Org Detail View" description={detail ? `Generated ${formatDateTime(detail.generatedAt)}` : undefined}>
                 {isDetailLoading ? (
                   <div className="flex h-40 items-center justify-center">
@@ -765,6 +890,44 @@ export default function OrganizationsPage() {
                   </div>
                 )}
               </Panel>
+            </div>
+          </Modal>
+
+          <Modal
+            title="Event Logs"
+            description={selectedOrganization?.orgName || 'Organization login history and recent events'}
+            isOpen={Boolean(eventLogsOrgId)}
+            onClose={() => setEventLogsOrgId(null)}
+          >
+            <div className="space-y-6">
+              <Panel title="Login History">
+                {isDetailLoading ? (
+                  <div className="flex h-40 items-center justify-center">
+                    <Loader2 className="h-6 w-6 animate-spin text-[#5b45ff]" />
+                  </div>
+                ) : detail?.members.length ? (
+                  <div className="thin-scrollbar max-h-[360px] space-y-3 overflow-y-auto">
+                    {[...detail.members]
+                      .sort((first, second) => new Date(second.lastSignInAt || 0).getTime() - new Date(first.lastSignInAt || 0).getTime())
+                      .map((member) => (
+                        <div key={member.userId} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-gray-950">{member.fullName}</p>
+                              <p className="mt-1 truncate text-xs text-gray-500">{member.email || member.userId}</p>
+                            </div>
+                            <StatusBadge status={member.lastSignInAt ? 'Signed in' : 'No login'} severity={member.lastSignInAt ? 'success' : 'info'} compact />
+                          </div>
+                          <p className="mt-3 text-xs text-gray-500">Last login: {formatDateTime(member.lastSignInAt)}</p>
+                        </div>
+                      ))}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500">
+                    No login history found for this organization.
+                  </div>
+                )}
+              </Panel>
 
               <Panel title="Recent organization events">
                 {detail?.recentEvents.length ? (
@@ -775,7 +938,6 @@ export default function OrganizationsPage() {
                   </div>
                 )}
               </Panel>
-            </div>
             </div>
           </Modal>
         </>

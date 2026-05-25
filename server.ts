@@ -2218,6 +2218,8 @@ function buildOrganizationRows(core: Awaited<ReturnType<typeof loadCoreData>>, a
       ownerEmail: user.email,
       plan,
       billingCycle: user.billingCycle || null,
+      billingStatus: user.billingStatus || null,
+      trialEndsAt: user.trialEndsAt || null,
       userCount: 1,
       status: user.isBanned ? 'banned' : user.billingStatus || (user.onboardingCompleted ? 'active' : 'setup'),
       revenue: Math.round(revenue * 100) / 100,
@@ -6169,6 +6171,9 @@ app.post('/api/admin/organizations/:orgId/action', requireAdmin, requireAdminPer
         }
         if (Object.prototype.hasOwnProperty.call(req.body, 'billingStatus')) {
           updates.billing_status = normalizeString(req.body.billingStatus) || 'active';
+        }
+        if (Object.prototype.hasOwnProperty.call(req.body, 'trialEndsAt')) {
+          updates.trial_ends_at = normalizeString(req.body.trialEndsAt) || null;
         }
       }
 

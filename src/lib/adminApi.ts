@@ -244,6 +244,7 @@ export const adminApi = {
       selectedPlan?: string;
       billingCycle?: string;
       billingStatus?: string;
+      trialEndsAt?: string | null;
       duration?: string;
       codeMethod?: 'SMS' | 'VOICE';
       language?: string;
