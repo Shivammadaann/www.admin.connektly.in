@@ -514,6 +514,34 @@ export type PlatformEmailTemplate = {
   updatedAt: string | null;
 };
 
+export type PlatformEmailProviderSettings = {
+  enabled: boolean;
+  smtpHost: string;
+  smtpPort: number;
+  smtpSecure: boolean;
+  smtpUser: string;
+  smtpPassword: string;
+  maskedSmtpPassword: string;
+  fromEmail: string;
+  fromName: string;
+  replyToEmail: string;
+  updatedAt: string | null;
+};
+
+export type PlatformCustomEmailTrigger = {
+  id: string;
+  triggerKey: string;
+  actionName: string;
+  description: string;
+  recipientMode: 'user' | 'admin' | 'custom';
+  customRecipientEmail: string;
+  subject: string;
+  html: string;
+  textBody: string;
+  enabled: boolean;
+  updatedAt: string | null;
+};
+
 export type UserPlatformSettings = {
   pricing_plans: {
     plans: PlatformPricingPlan[];
@@ -533,7 +561,9 @@ export type UserPlatformSettings = {
     keys: PlatformApiKey[];
   };
   email_templates: {
+    provider: PlatformEmailProviderSettings;
     templates: PlatformEmailTemplate[];
+    customTriggers: PlatformCustomEmailTrigger[];
   };
 };
 

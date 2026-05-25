@@ -771,6 +771,18 @@ const defaultPlatformSettings = {
     ],
   },
   email_templates: {
+    provider: {
+      enabled: false,
+      smtpHost: '',
+      smtpPort: 587,
+      smtpSecure: false,
+      smtpUser: '',
+      smtpPassword: '',
+      fromEmail: 'notifications@connektly.in',
+      fromName: 'Connektly',
+      replyToEmail: '',
+      updatedAt: null,
+    },
     templates: [
       {
         id: 'invite_user',
@@ -793,6 +805,22 @@ const defaultPlatformSettings = {
         name: 'Magic link email',
         subject: 'Your Connektly login link',
         body: 'Hi {{user_name}},\n\nUse this secure link to sign in: {{magic_link}}',
+        enabled: true,
+        updatedAt: null,
+      },
+    ],
+    customTriggers: [
+      {
+        id: 'template_approved',
+        triggerKey: 'template_approved',
+        actionName: 'WhatsApp template approved',
+        description: 'Sent when Meta approves a WhatsApp message template.',
+        recipientMode: 'user',
+        customRecipientEmail: '',
+        subject: 'WhatsApp template approved',
+        html:
+          '<div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6;"><h2>{{title}}</h2><p>{{body}}</p><p>Template: {{template_name}}</p><p><a href="{{target_url}}">Open templates in Connektly</a></p></div>',
+        textBody: '{{body}}\n\nTemplate: {{template_name}}\nOpen templates: {{target_url}}',
         enabled: true,
         updatedAt: null,
       },
@@ -1157,8 +1185,26 @@ function normalizePlatformSettingsSection(section: PlatformSettingsSection, inco
   }
 
   if (section === 'email_templates') {
+    const currentProvider = isRecord(current?.provider) ? current.provider : {};
+    const incomingProvider = isRecord(value.provider) ? value.provider : {};
+    const nextPassword = normalizeString(incomingProvider.smtpPassword);
+    const previousPassword = normalizeString(currentProvider.smtpPassword);
+    const provider = {
+      enabled: Boolean(incomingProvider.enabled),
+      smtpHost: normalizeString(incomingProvider.smtpHost) || '',
+      smtpPort: normalizeNumber(incomingProvider.smtpPort, fallback.provider.smtpPort),
+      smtpSecure: Boolean(incomingProvider.smtpSecure),
+      smtpUser: normalizeString(incomingProvider.smtpUser) || '',
+      smtpPassword: nextPassword || previousPassword || '',
+      fromEmail: normalizeString(incomingProvider.fromEmail) || '',
+      fromName: normalizeString(incomingProvider.fromName) || 'Connektly',
+      replyToEmail: normalizeString(incomingProvider.replyToEmail) || '',
+      updatedAt: nowIso(),
+    };
     const templates = Array.isArray(value.templates) ? value.templates : fallback.templates;
+    const customTriggers = Array.isArray(value.customTriggers) ? value.customTriggers : fallback.customTriggers;
     return {
+      provider,
       templates: templates.map((template: any) => ({
         id: normalizeString(template.id) || normalizeString(template.name)?.toLowerCase().replace(/[^a-z0-9]+/g, '_') || `template_${Date.now()}`,
         name: normalizeString(template.name) || 'Untitled template',
@@ -1167,6 +1213,26 @@ function normalizePlatformSettingsSection(section: PlatformSettingsSection, inco
         enabled: Boolean(template.enabled),
         updatedAt: nowIso(),
       })),
+      customTriggers: customTriggers.map((trigger: any) => {
+        const triggerKey =
+          normalizeString(trigger.triggerKey) ||
+          normalizeString(trigger.actionName)?.toLowerCase().replace(/[^a-z0-9]+/g, '_') ||
+          `custom_action_${Date.now()}`;
+        const recipientMode = ['user', 'admin', 'custom'].includes(String(trigger.recipientMode)) ? String(trigger.recipientMode) : 'user';
+        return {
+          id: normalizeString(trigger.id) || triggerKey,
+          triggerKey,
+          actionName: normalizeString(trigger.actionName) || 'Custom action',
+          description: normalizeString(trigger.description) || '',
+          recipientMode,
+          customRecipientEmail: normalizeString(trigger.customRecipientEmail) || '',
+          subject: normalizeString(trigger.subject) || '',
+          html: normalizeString(trigger.html) || '',
+          textBody: normalizeString(trigger.textBody) || '',
+          enabled: Boolean(trigger.enabled),
+          updatedAt: nowIso(),
+        };
+      }),
     };
   }
 
@@ -1182,6 +1248,14 @@ function redactPlatformSettingsForAdmin(settings: Record<PlatformSettingsSection
         key: '',
         maskedKey: maskSecret(apiKey.key),
       })),
+    },
+    email_templates: {
+      ...settings.email_templates,
+      provider: {
+        ...settings.email_templates.provider,
+        smtpPassword: '',
+        maskedSmtpPassword: maskSecret(settings.email_templates.provider?.smtpPassword),
+      },
     },
   };
 }

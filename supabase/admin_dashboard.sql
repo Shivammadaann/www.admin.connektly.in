@@ -168,6 +168,15 @@ begin
   from public.user_platform_settings
   where section <> 'api_keys';
 
+  if jsonb_typeof(result->'email_templates'->'provider') = 'object' then
+    result := jsonb_set(
+      result,
+      '{email_templates,provider}',
+      (result->'email_templates'->'provider') - 'smtpPassword',
+      true
+    );
+  end if;
+
   feature_flags := result->'feature_flags';
   if jsonb_typeof(feature_flags) = 'object' then
     if p_org_id is not null

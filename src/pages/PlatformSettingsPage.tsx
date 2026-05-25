@@ -16,6 +16,7 @@ import {
 import { adminApi } from '../lib/adminApi';
 import type {
   AdminOrganizationRow,
+  PlatformCustomEmailTrigger,
   PlatformEmailTemplate,
   UserPlatformSettings,
 } from '../lib/types';
@@ -53,6 +54,7 @@ export default function PlatformSettingsPage() {
   const [organizations, setOrganizations] = useState<AdminOrganizationRow[]>([]);
   const [activeTab, setActiveTab] = useState<TabId>('pricing_plans');
   const [activeTemplateId, setActiveTemplateId] = useState('invite_user');
+  const [activeTriggerId, setActiveTriggerId] = useState('template_approved');
   const [isLoading, setIsLoading] = useState(true);
   const [savingSection, setSavingSection] = useState<TabId | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +73,7 @@ export default function PlatformSettingsPage() {
       setWarning(settingsResponse.warning);
       setOrganizations(organizationResponse.organizations);
       setActiveTemplateId(settingsResponse.settings.email_templates.templates[0]?.id || 'invite_user');
+      setActiveTriggerId(settingsResponse.settings.email_templates.customTriggers[0]?.id || 'template_approved');
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Failed to load platform settings.');
     } finally {
@@ -106,6 +109,11 @@ export default function PlatformSettingsPage() {
   const selectedTemplate = useMemo(
     () => settings?.email_templates.templates.find((template) => template.id === activeTemplateId) || settings?.email_templates.templates[0] || null,
     [activeTemplateId, settings],
+  );
+
+  const selectedCustomTrigger = useMemo(
+    () => settings?.email_templates.customTriggers.find((trigger) => trigger.id === activeTriggerId) || settings?.email_templates.customTriggers[0] || null,
+    [activeTriggerId, settings],
   );
 
   const addFeatureOverride = () => {
@@ -788,8 +796,8 @@ export default function PlatformSettingsPage() {
 
             {activeTab === 'email_templates' ? (
               <Panel
-                title="Email templates"
-                description="Manage app-owned templates such as invite user, password reset, and magic-link emails."
+                title="Email settings"
+                description="Manage the app notification SMTP provider and custom action emails served to app.connektly.in."
                 action={
                   <button
                     type="button"
@@ -802,131 +810,593 @@ export default function PlatformSettingsPage() {
                   </button>
                 }
               >
-                <div className="grid gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
-                  <div className="space-y-2">
-                    {settings.email_templates.templates.map((template) => (
-                      <button
-                        key={template.id}
-                        type="button"
-                        onClick={() => setActiveTemplateId(template.id)}
-                        className={`w-full rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition ${
-                          selectedTemplate?.id === template.id
-                            ? 'border-[#5b45ff] bg-[#f5f3ff] text-[#5b45ff]'
-                            : 'border-gray-200 bg-gray-50 text-gray-700 hover:bg-white'
-                        }`}
-                      >
-                        <span className="block truncate">{template.name}</span>
-                        <span className="mt-1 block text-xs font-normal text-gray-500">{template.enabled ? 'Enabled' : 'Disabled'}</span>
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateSettings((current) => {
-                          const template: PlatformEmailTemplate = {
-                            id: makeId('template'),
-                            name: 'New template',
-                            subject: '',
-                            body: '',
-                            enabled: false,
-                            updatedAt: null,
-                          };
-                          setActiveTemplateId(template.id);
-                          return {
-                            ...current,
-                            email_templates: { templates: [...current.email_templates.templates, template] },
-                          };
-                        })
-                      }
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
-                    >
-                      <Plus className="h-4 w-4" />
-                      Add template
-                    </button>
+                <div className="space-y-6">
+                  <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-bold text-gray-950">SMTP notification provider</p>
+                        <p className="mt-1 text-sm text-gray-500">These settings replace the client app notification email ENV values.</p>
+                      </div>
+                      <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={settings.email_templates.provider.enabled}
+                          onChange={(event) =>
+                            updateSettings((current) => ({
+                              ...current,
+                              email_templates: {
+                                ...current.email_templates,
+                                provider: { ...current.email_templates.provider, enabled: event.target.checked },
+                              },
+                            }))
+                          }
+                          className="h-4 w-4 rounded border-gray-300 text-[#5b45ff]"
+                        />
+                        Enabled
+                      </label>
+                    </div>
+                    <div className="grid gap-4 lg:grid-cols-3">
+                      <label className="block">
+                        <span className={labelClass}>SMTP host</span>
+                        <input
+                          value={settings.email_templates.provider.smtpHost}
+                          onChange={(event) =>
+                            updateSettings((current) => ({
+                              ...current,
+                              email_templates: {
+                                ...current.email_templates,
+                                provider: { ...current.email_templates.provider, smtpHost: event.target.value },
+                              },
+                            }))
+                          }
+                          className={inputClass}
+                          placeholder="smtp.example.com"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className={labelClass}>SMTP port</span>
+                        <input
+                          type="number"
+                          value={settings.email_templates.provider.smtpPort}
+                          onChange={(event) =>
+                            updateSettings((current) => ({
+                              ...current,
+                              email_templates: {
+                                ...current.email_templates,
+                                provider: { ...current.email_templates.provider, smtpPort: Number(event.target.value) },
+                              },
+                            }))
+                          }
+                          className={inputClass}
+                        />
+                      </label>
+                      <label className="flex items-end gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={settings.email_templates.provider.smtpSecure}
+                          onChange={(event) =>
+                            updateSettings((current) => ({
+                              ...current,
+                              email_templates: {
+                                ...current.email_templates,
+                                provider: { ...current.email_templates.provider, smtpSecure: event.target.checked },
+                              },
+                            }))
+                          }
+                          className="mb-1 h-4 w-4 rounded border-gray-300 text-[#5b45ff]"
+                        />
+                        Use SSL/TLS
+                      </label>
+                      <label className="block">
+                        <span className={labelClass}>SMTP user</span>
+                        <input
+                          value={settings.email_templates.provider.smtpUser}
+                          onChange={(event) =>
+                            updateSettings((current) => ({
+                              ...current,
+                              email_templates: {
+                                ...current.email_templates,
+                                provider: { ...current.email_templates.provider, smtpUser: event.target.value },
+                              },
+                            }))
+                          }
+                          className={inputClass}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className={labelClass}>
+                          {settings.email_templates.provider.maskedSmtpPassword
+                            ? `Current: ${settings.email_templates.provider.maskedSmtpPassword}`
+                            : 'SMTP password'}
+                        </span>
+                        <input
+                          type="password"
+                          value={settings.email_templates.provider.smtpPassword}
+                          onChange={(event) =>
+                            updateSettings((current) => ({
+                              ...current,
+                              email_templates: {
+                                ...current.email_templates,
+                                provider: { ...current.email_templates.provider, smtpPassword: event.target.value },
+                              },
+                            }))
+                          }
+                          className={inputClass}
+                          placeholder="Enter only to rotate"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className={labelClass}>From email</span>
+                        <input
+                          type="email"
+                          value={settings.email_templates.provider.fromEmail}
+                          onChange={(event) =>
+                            updateSettings((current) => ({
+                              ...current,
+                              email_templates: {
+                                ...current.email_templates,
+                                provider: { ...current.email_templates.provider, fromEmail: event.target.value },
+                              },
+                            }))
+                          }
+                          className={inputClass}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className={labelClass}>From name</span>
+                        <input
+                          value={settings.email_templates.provider.fromName}
+                          onChange={(event) =>
+                            updateSettings((current) => ({
+                              ...current,
+                              email_templates: {
+                                ...current.email_templates,
+                                provider: { ...current.email_templates.provider, fromName: event.target.value },
+                              },
+                            }))
+                          }
+                          className={inputClass}
+                        />
+                      </label>
+                      <label className="block lg:col-span-2">
+                        <span className={labelClass}>Reply-to email</span>
+                        <input
+                          type="email"
+                          value={settings.email_templates.provider.replyToEmail}
+                          onChange={(event) =>
+                            updateSettings((current) => ({
+                              ...current,
+                              email_templates: {
+                                ...current.email_templates,
+                                provider: { ...current.email_templates.provider, replyToEmail: event.target.value },
+                              },
+                            }))
+                          }
+                          className={inputClass}
+                          placeholder="Optional"
+                        />
+                      </label>
+                    </div>
                   </div>
 
-                  {selectedTemplate ? (
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <StatusBadge status={selectedTemplate.enabled ? 'enabled' : 'disabled'} severity={selectedTemplate.enabled ? 'success' : 'warning'} />
-                        <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                  <div className="rounded-2xl border border-gray-200 bg-white">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-4">
+                      <div>
+                        <p className="text-sm font-bold text-gray-950">Custom email triggers</p>
+                        <p className="mt-1 text-sm text-gray-500">Enable, disable, and edit HTML emails for app actions.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateSettings((current) => {
+                            const trigger: PlatformCustomEmailTrigger = {
+                              id: makeId('email_trigger'),
+                              triggerKey: 'custom_action',
+                              actionName: 'Custom action',
+                              description: '',
+                              recipientMode: 'user',
+                              customRecipientEmail: '',
+                              subject: '',
+                              html: '<div>{{body}}</div>',
+                              textBody: '',
+                              enabled: false,
+                              updatedAt: null,
+                            };
+                            setActiveTriggerId(trigger.id);
+                            return {
+                              ...current,
+                              email_templates: {
+                                ...current.email_templates,
+                                customTriggers: [...current.email_templates.customTriggers, trigger],
+                              },
+                            };
+                          })
+                        }
+                        className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Add trigger
+                      </button>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Action</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Trigger key</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Recipient</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Status</th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {settings.email_templates.customTriggers.map((trigger) => (
+                            <tr key={trigger.id} className="hover:bg-gray-50">
+                              <td className="px-4 py-4 align-top">
+                                <p className="text-sm font-semibold text-gray-950">{trigger.actionName}</p>
+                                <p className="mt-1 max-w-md truncate text-xs text-gray-500">{trigger.subject || 'No subject set'}</p>
+                              </td>
+                              <td className="px-4 py-4 align-top font-mono text-xs text-gray-600">{trigger.triggerKey}</td>
+                              <td className="px-4 py-4 align-top text-sm text-gray-600">
+                                {trigger.recipientMode === 'custom' ? trigger.customRecipientEmail || 'Custom email' : labelize(trigger.recipientMode)}
+                              </td>
+                              <td className="px-4 py-4 align-top">
+                                <button
+                                  type="button"
+                                  role="switch"
+                                  aria-checked={trigger.enabled}
+                                  onClick={() =>
+                                    updateSettings((current) => ({
+                                      ...current,
+                                      email_templates: {
+                                        ...current.email_templates,
+                                        customTriggers: current.email_templates.customTriggers.map((item) =>
+                                          item.id === trigger.id ? { ...item, enabled: !item.enabled } : item,
+                                        ),
+                                      },
+                                    }))
+                                  }
+                                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                                    trigger.enabled ? 'bg-emerald-500' : 'bg-gray-300'
+                                  }`}
+                                >
+                                  <span
+                                    className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                                      trigger.enabled ? 'translate-x-5' : 'translate-x-0.5'
+                                    }`}
+                                  />
+                                </button>
+                              </td>
+                              <td className="px-4 py-4 text-right align-top">
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveTriggerId(trigger.id)}
+                                  className="rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                                >
+                                  Edit
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {selectedCustomTrigger ? (
+                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="mb-4 flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-gray-950">Edit custom trigger</p>
+                          <p className="mt-1 text-sm text-gray-500">{selectedCustomTrigger.triggerKey}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateSettings((current) => {
+                              const triggers = current.email_templates.customTriggers.filter((trigger) => trigger.id !== selectedCustomTrigger.id);
+                              setActiveTriggerId(triggers[0]?.id || '');
+                              return {
+                                ...current,
+                                email_templates: { ...current.email_templates, customTriggers: triggers },
+                              };
+                            })
+                          }
+                          className="rounded-2xl border border-rose-200 bg-white px-4 py-3 text-sm font-semibold text-rose-600 hover:bg-rose-50"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        <label className="block">
+                          <span className={labelClass}>Action name</span>
                           <input
-                            type="checkbox"
-                            checked={selectedTemplate.enabled}
+                            value={selectedCustomTrigger.actionName}
                             onChange={(event) =>
                               updateSettings((current) => ({
                                 ...current,
                                 email_templates: {
-                                  templates: current.email_templates.templates.map((template) =>
-                                    template.id === selectedTemplate.id ? { ...template, enabled: event.target.checked } : template,
+                                  ...current.email_templates,
+                                  customTriggers: current.email_templates.customTriggers.map((trigger) =>
+                                    trigger.id === selectedCustomTrigger.id ? { ...trigger, actionName: event.target.value } : trigger,
                                   ),
                                 },
                               }))
                             }
-                            className="h-4 w-4 rounded border-gray-300 text-[#5b45ff]"
+                            className={inputClass}
                           />
-                          Enabled
+                        </label>
+                        <label className="block">
+                          <span className={labelClass}>Trigger key</span>
+                          <input
+                            value={selectedCustomTrigger.triggerKey}
+                            onChange={(event) =>
+                              updateSettings((current) => ({
+                                ...current,
+                                email_templates: {
+                                  ...current.email_templates,
+                                  customTriggers: current.email_templates.customTriggers.map((trigger) =>
+                                    trigger.id === selectedCustomTrigger.id ? { ...trigger, triggerKey: event.target.value } : trigger,
+                                  ),
+                                },
+                              }))
+                            }
+                            className={inputClass}
+                          />
+                        </label>
+                        <label className="block lg:col-span-2">
+                          <span className={labelClass}>Description</span>
+                          <input
+                            value={selectedCustomTrigger.description}
+                            onChange={(event) =>
+                              updateSettings((current) => ({
+                                ...current,
+                                email_templates: {
+                                  ...current.email_templates,
+                                  customTriggers: current.email_templates.customTriggers.map((trigger) =>
+                                    trigger.id === selectedCustomTrigger.id ? { ...trigger, description: event.target.value } : trigger,
+                                  ),
+                                },
+                              }))
+                            }
+                            className={inputClass}
+                          />
+                        </label>
+                        <label className="block">
+                          <span className={labelClass}>Recipient mode</span>
+                          <select
+                            value={selectedCustomTrigger.recipientMode}
+                            onChange={(event) =>
+                              updateSettings((current) => ({
+                                ...current,
+                                email_templates: {
+                                  ...current.email_templates,
+                                  customTriggers: current.email_templates.customTriggers.map((trigger) =>
+                                    trigger.id === selectedCustomTrigger.id
+                                      ? { ...trigger, recipientMode: event.target.value as PlatformCustomEmailTrigger['recipientMode'] }
+                                      : trigger,
+                                  ),
+                                },
+                              }))
+                            }
+                            className={inputClass}
+                          >
+                            <option value="user">Action user</option>
+                            <option value="admin">Admin sender</option>
+                            <option value="custom">Custom email</option>
+                          </select>
+                        </label>
+                        <label className="block">
+                          <span className={labelClass}>Custom recipient</span>
+                          <input
+                            type="email"
+                            value={selectedCustomTrigger.customRecipientEmail}
+                            onChange={(event) =>
+                              updateSettings((current) => ({
+                                ...current,
+                                email_templates: {
+                                  ...current.email_templates,
+                                  customTriggers: current.email_templates.customTriggers.map((trigger) =>
+                                    trigger.id === selectedCustomTrigger.id ? { ...trigger, customRecipientEmail: event.target.value } : trigger,
+                                  ),
+                                },
+                              }))
+                            }
+                            className={inputClass}
+                          />
+                        </label>
+                        <label className="block lg:col-span-2">
+                          <span className={labelClass}>Subject</span>
+                          <input
+                            value={selectedCustomTrigger.subject}
+                            onChange={(event) =>
+                              updateSettings((current) => ({
+                                ...current,
+                                email_templates: {
+                                  ...current.email_templates,
+                                  customTriggers: current.email_templates.customTriggers.map((trigger) =>
+                                    trigger.id === selectedCustomTrigger.id ? { ...trigger, subject: event.target.value } : trigger,
+                                  ),
+                                },
+                              }))
+                            }
+                            className={inputClass}
+                          />
+                        </label>
+                        <label className="block lg:col-span-2">
+                          <span className={labelClass}>HTML code</span>
+                          <textarea
+                            value={selectedCustomTrigger.html}
+                            onChange={(event) =>
+                              updateSettings((current) => ({
+                                ...current,
+                                email_templates: {
+                                  ...current.email_templates,
+                                  customTriggers: current.email_templates.customTriggers.map((trigger) =>
+                                    trigger.id === selectedCustomTrigger.id ? { ...trigger, html: event.target.value } : trigger,
+                                  ),
+                                },
+                              }))
+                            }
+                            rows={10}
+                            className={`${inputClass} resize-y font-mono leading-6`}
+                          />
+                        </label>
+                        <label className="block lg:col-span-2">
+                          <span className={labelClass}>Plain text fallback</span>
+                          <textarea
+                            value={selectedCustomTrigger.textBody}
+                            onChange={(event) =>
+                              updateSettings((current) => ({
+                                ...current,
+                                email_templates: {
+                                  ...current.email_templates,
+                                  customTriggers: current.email_templates.customTriggers.map((trigger) =>
+                                    trigger.id === selectedCustomTrigger.id ? { ...trigger, textBody: event.target.value } : trigger,
+                                  ),
+                                },
+                              }))
+                            }
+                            rows={5}
+                            className={`${inputClass} resize-y font-mono leading-6`}
+                          />
                         </label>
                       </div>
-                      <label className="block">
-                        <span className={labelClass}>Template name</span>
-                        <input
-                          value={selectedTemplate.name}
-                          onChange={(event) =>
-                            updateSettings((current) => ({
-                              ...current,
-                              email_templates: {
-                                templates: current.email_templates.templates.map((template) =>
-                                  template.id === selectedTemplate.id ? { ...template, name: event.target.value } : template,
-                                ),
-                              },
-                            }))
-                          }
-                          className={inputClass}
-                        />
-                      </label>
-                      <label className="block">
-                        <span className={labelClass}>Subject</span>
-                        <input
-                          value={selectedTemplate.subject}
-                          onChange={(event) =>
-                            updateSettings((current) => ({
-                              ...current,
-                              email_templates: {
-                                templates: current.email_templates.templates.map((template) =>
-                                  template.id === selectedTemplate.id ? { ...template, subject: event.target.value } : template,
-                                ),
-                              },
-                            }))
-                          }
-                          className={inputClass}
-                        />
-                      </label>
-                      <label className="block">
-                        <span className={labelClass}>Body</span>
-                        <textarea
-                          value={selectedTemplate.body}
-                          onChange={(event) =>
-                            updateSettings((current) => ({
-                              ...current,
-                              email_templates: {
-                                templates: current.email_templates.templates.map((template) =>
-                                  template.id === selectedTemplate.id ? { ...template, body: event.target.value } : template,
-                                ),
-                              },
-                            }))
-                          }
-                          rows={12}
-                          className={`${inputClass} resize-y font-mono leading-6`}
-                        />
-                      </label>
-                      <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm leading-6 text-gray-500">
+                      <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-4 text-sm leading-6 text-gray-500">
                         <Code2 className="mb-2 h-5 w-5 text-gray-400" />
-                        Supported placeholders are stored as text and resolved by the main app/email worker, for example:
-                        {' {{user_name}}, {{organization_name}}, {{invite_url}}, {{reset_url}}, {{magic_link}}'}.
+                        Available placeholders include {'{{title}}, {{body}}, {{target_url}}, {{template_name}}, {{language}}, {{user_email}}'}.
                       </div>
                     </div>
                   ) : null}
+
+                  <div className="grid gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
+                    <div className="space-y-2">
+                      {settings.email_templates.templates.map((template) => (
+                        <button
+                          key={template.id}
+                          type="button"
+                          onClick={() => setActiveTemplateId(template.id)}
+                          className={`w-full rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition ${
+                            selectedTemplate?.id === template.id
+                              ? 'border-[#5b45ff] bg-[#f5f3ff] text-[#5b45ff]'
+                              : 'border-gray-200 bg-gray-50 text-gray-700 hover:bg-white'
+                          }`}
+                        >
+                          <span className="block truncate">{template.name}</span>
+                          <span className="mt-1 block text-xs font-normal text-gray-500">{template.enabled ? 'Enabled' : 'Disabled'}</span>
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateSettings((current) => {
+                            const template: PlatformEmailTemplate = {
+                              id: makeId('template'),
+                              name: 'New template',
+                              subject: '',
+                              body: '',
+                              enabled: false,
+                              updatedAt: null,
+                            };
+                            setActiveTemplateId(template.id);
+                            return {
+                              ...current,
+                              email_templates: {
+                                ...current.email_templates,
+                                templates: [...current.email_templates.templates, template],
+                              },
+                            };
+                          })
+                        }
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Add template
+                      </button>
+                    </div>
+
+                    {selectedTemplate ? (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <StatusBadge status={selectedTemplate.enabled ? 'enabled' : 'disabled'} severity={selectedTemplate.enabled ? 'success' : 'warning'} />
+                          <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                            <input
+                              type="checkbox"
+                              checked={selectedTemplate.enabled}
+                              onChange={(event) =>
+                                updateSettings((current) => ({
+                                  ...current,
+                                  email_templates: {
+                                    ...current.email_templates,
+                                    templates: current.email_templates.templates.map((template) =>
+                                      template.id === selectedTemplate.id ? { ...template, enabled: event.target.checked } : template,
+                                    ),
+                                  },
+                                }))
+                              }
+                              className="h-4 w-4 rounded border-gray-300 text-[#5b45ff]"
+                            />
+                            Enabled
+                          </label>
+                        </div>
+                        <label className="block">
+                          <span className={labelClass}>Template name</span>
+                          <input
+                            value={selectedTemplate.name}
+                            onChange={(event) =>
+                              updateSettings((current) => ({
+                                ...current,
+                                email_templates: {
+                                  ...current.email_templates,
+                                  templates: current.email_templates.templates.map((template) =>
+                                    template.id === selectedTemplate.id ? { ...template, name: event.target.value } : template,
+                                  ),
+                                },
+                              }))
+                            }
+                            className={inputClass}
+                          />
+                        </label>
+                        <label className="block">
+                          <span className={labelClass}>Subject</span>
+                          <input
+                            value={selectedTemplate.subject}
+                            onChange={(event) =>
+                              updateSettings((current) => ({
+                                ...current,
+                                email_templates: {
+                                  ...current.email_templates,
+                                  templates: current.email_templates.templates.map((template) =>
+                                    template.id === selectedTemplate.id ? { ...template, subject: event.target.value } : template,
+                                  ),
+                                },
+                              }))
+                            }
+                            className={inputClass}
+                          />
+                        </label>
+                        <label className="block">
+                          <span className={labelClass}>Body</span>
+                          <textarea
+                            value={selectedTemplate.body}
+                            onChange={(event) =>
+                              updateSettings((current) => ({
+                                ...current,
+                                email_templates: {
+                                  ...current.email_templates,
+                                  templates: current.email_templates.templates.map((template) =>
+                                    template.id === selectedTemplate.id ? { ...template, body: event.target.value } : template,
+                                  ),
+                                },
+                              }))
+                            }
+                            rows={8}
+                            className={`${inputClass} resize-y font-mono leading-6`}
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               </Panel>
             ) : null}
