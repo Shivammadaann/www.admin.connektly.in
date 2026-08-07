@@ -18,11 +18,6 @@ import type {
   ServerResponse,
   UserPlatformSettings,
   UserPlatformSettingsResponse,
-  WebsiteBlogPost,
-  WebsiteContentResponse,
-  WebsiteLeadFormsResponse,
-  WebsiteHelpArticle,
-  WebsiteMediaUploadResponse,
   WebhooksResponse,
   WebhookTokenRevealResponse,
   AdminLiveEvent,
@@ -110,52 +105,6 @@ export const adminApi = {
     return request<PlanManagementResponse>('/plans', {
       method: 'PUT',
       body: JSON.stringify({ plans }),
-    });
-  },
-  getWebsiteContent() {
-    return request<WebsiteContentResponse>('/website-content', { cache: 'no-store' });
-  },
-  getWebsiteLeads() {
-    return request<WebsiteLeadFormsResponse>('/website-leads', { cache: 'no-store' });
-  },
-  uploadWebsiteMedia(payload: { fileName: string; dataUrl: string }) {
-    return request<WebsiteMediaUploadResponse>('/website-content/media', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  },
-  createWebsiteBlog(payload: Omit<WebsiteBlogPost, 'id' | 'date' | 'updatedAt'>) {
-    return request<WebsiteContentResponse>('/website-content/blogs', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  },
-  updateWebsiteBlog(id: string, payload: Omit<WebsiteBlogPost, 'id' | 'date' | 'updatedAt'>) {
-    return request<WebsiteContentResponse>(`/website-content/blogs/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
-    });
-  },
-  deleteWebsiteBlog(id: string) {
-    return request<WebsiteContentResponse>(`/website-content/blogs/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    });
-  },
-  createWebsiteHelpArticle(payload: Omit<WebsiteHelpArticle, 'id' | 'date' | 'updatedAt'>) {
-    return request<WebsiteContentResponse>('/website-content/help', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  },
-  updateWebsiteHelpArticle(id: string, payload: Omit<WebsiteHelpArticle, 'id' | 'date' | 'updatedAt'>) {
-    return request<WebsiteContentResponse>(`/website-content/help/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
-    });
-  },
-  deleteWebsiteHelpArticle(id: string) {
-    return request<WebsiteContentResponse>(`/website-content/help/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
     });
   },
   getOwnerSettings() {

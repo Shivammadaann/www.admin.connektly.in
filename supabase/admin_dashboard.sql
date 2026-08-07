@@ -109,7 +109,7 @@ values (
   'Primary Owner',
   'primary_owner',
   'active',
-  '["command_center", "organizations", "global_users", "plan_management", "platform_settings", "payments", "logs_monitoring", "global_integrations", "website_management", "webhooks", "server_status", "security_audit"]'::jsonb,
+  '["command_center", "organizations", "global_users", "plan_management", "platform_settings", "payments", "logs_monitoring", "global_integrations", "webhooks", "server_status", "security_audit"]'::jsonb,
   timezone('utc', now())
 )
 on conflict (email) do update
@@ -118,6 +118,18 @@ set
   status = 'active',
   permissions = excluded.permissions,
   updated_at = timezone('utc', now());
+
+update public.owner_admin_users
+set permissions = coalesce(
+  (
+    select jsonb_agg(permission)
+    from jsonb_array_elements(permissions) as permission
+    where permission <> to_jsonb('website_management'::text)
+  ),
+  '[]'::jsonb
+),
+updated_at = timezone('utc', now())
+where permissions ? 'website_management';
 
 update public.owner_admin_users admin_row
 set auth_user_id = auth_user.id,

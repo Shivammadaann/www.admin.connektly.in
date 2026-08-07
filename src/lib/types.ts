@@ -85,85 +85,6 @@ export type ClientFeatureOperationsResponse = {
   warnings: string[];
 };
 
-export type WebsiteBlogPost = {
-  id: string;
-  title: string;
-  author: string;
-  excerpt: string;
-  content: string;
-  coverImage: string;
-  date: string;
-  updatedAt?: string | null;
-};
-
-export type WebsiteHelpArticle = {
-  id: string;
-  title: string;
-  author: string;
-  category: string;
-  excerpt: string;
-  content: string;
-  date: string;
-  updatedAt?: string | null;
-};
-
-export type WebsiteContentResponse = {
-  generatedAt: string;
-  publicBaseUrl: string;
-  summary: {
-    blogs: number;
-    helpArticles: number;
-    helpCategories: number;
-    mediaRootConfigured: boolean;
-  };
-  categories: string[];
-  blogs: WebsiteBlogPost[];
-  helpArticles: WebsiteHelpArticle[];
-  warnings: string[];
-};
-
-export type WebsiteLeadSubmissionType = 'booked_demo' | 'lead_inquiry';
-
-export type WebsiteLeadSubmission = {
-  id: string;
-  type: WebsiteLeadSubmissionType;
-  submittedAt: string;
-  sourcePath: string;
-  sourceUrl: string;
-  pageTitle: string;
-  formId: string;
-  userAgent: string;
-  name: string;
-  email: string;
-  phone: string;
-  company: string;
-  topic: string;
-  message: string;
-  fields: Record<string, string | string[]>;
-};
-
-export type WebsiteLeadFormsResponse = {
-  generatedAt: string;
-  publicBaseUrl: string;
-  summary: {
-    total: number;
-    bookedDemos: number;
-    leadInquiries: number;
-    lastSubmissionAt: string | null;
-  };
-  bookedDemos: WebsiteLeadSubmission[];
-  leadInquiries: WebsiteLeadSubmission[];
-  submissions: WebsiteLeadSubmission[];
-  warnings: string[];
-};
-
-export type WebsiteMediaUploadResponse = {
-  location: string;
-  publicUrl: string | null;
-  contentType: string;
-  size: number;
-};
-
 export type SystemHealth = {
   generatedAt: string;
   status: 'ok' | 'warning' | 'critical';
@@ -598,7 +519,6 @@ export type AdminPermissionKey =
   | 'payments'
   | 'logs_monitoring'
   | 'global_integrations'
-  | 'website_management'
   | 'webhooks'
   | 'server_status'
   | 'security_audit';

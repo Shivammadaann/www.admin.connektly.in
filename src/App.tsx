@@ -8,10 +8,8 @@ import { getCachedSession, supabase } from './lib/supabase';
 import { LiveEventsProvider } from './lib/liveEvents';
 import type { AdminAccessSummary } from './lib/types';
 import AdminLayout from './components/AdminLayout';
-import WebsiteLayout from './components/WebsiteLayout';
 import BrandMark from './components/BrandMark';
 import TurnstileWidget from './components/TurnstileWidget';
-import ManagementSelectorPage from './pages/ManagementSelectorPage';
 import CommandCenter from './pages/CommandCenter';
 import OrganizationsPage from './pages/OrganizationsPage';
 import UsersPage from './pages/UsersPage';
@@ -20,8 +18,6 @@ import PlatformSettingsPage from './pages/PlatformSettingsPage';
 import LogsMonitoringPage from './pages/LogsMonitoringPage';
 import GlobalIntegrationsPage from './pages/GlobalIntegrationsPage';
 import ClientFeatureOperationsPage from './pages/ClientFeatureOperationsPage';
-import WebsiteManagementPage from './pages/WebsiteManagementPage';
-import WebsiteLeadFormDataPage from './pages/WebsiteLeadFormDataPage';
 import PaymentsPage from './pages/PaymentsPage';
 import WebhooksPage from './pages/WebhooksPage';
 import OwnerSettingsPage from './pages/OwnerSettingsPage';
@@ -432,15 +428,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={session ? <Navigate to="/manage" replace /> : <LoginPage />} />
-        <Route
-          path="/manage"
-          element={
-            <ProtectedAdmin session={session}>
-              {(adminEmail, adminAccess) => <ManagementSelectorPage adminEmail={adminEmail} adminAccess={adminAccess} />}
-            </ProtectedAdmin>
-          }
-        />
+        <Route path="/login" element={session ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
+        <Route path="/manage" element={<Navigate to="/dashboard" replace />} />
         <Route
           path="/dashboard"
           element={
@@ -461,27 +450,13 @@ export default function App() {
           <Route path="logs-monitoring" element={<LogsMonitoringPage />} />
           <Route path="global-integrations" element={<GlobalIntegrationsPage />} />
           <Route path="client-features" element={<ClientFeatureOperationsPage />} />
-          <Route path="website" element={<Navigate to="/website-management/content" replace />} />
-          <Route path="website-leads" element={<Navigate to="/website-management/leads" replace />} />
           <Route path="payments" element={<PaymentsPage />} />
           <Route path="webhooks" element={<WebhooksPage />} />
           <Route path="server" element={<Navigate to="/dashboard/logs-monitoring" replace />} />
           <Route path="audit" element={<Navigate to="/dashboard/logs-monitoring" replace />} />
           <Route path="settings" element={<OwnerSettingsPage />} />
         </Route>
-        <Route
-          path="/website-management"
-          element={
-            <ProtectedAdmin session={session}>
-              {(adminEmail, adminAccess) => <WebsiteLayout adminEmail={adminEmail} adminAccess={adminAccess} />}
-            </ProtectedAdmin>
-          }
-        >
-          <Route index element={<Navigate to="/website-management/content" replace />} />
-          <Route path="content" element={<WebsiteManagementPage />} />
-          <Route path="leads" element={<WebsiteLeadFormDataPage />} />
-        </Route>
-        <Route path="*" element={<Navigate to={session ? '/manage' : '/login'} replace />} />
+        <Route path="*" element={<Navigate to={session ? '/dashboard' : '/login'} replace />} />
       </Routes>
     </BrowserRouter>
   );
