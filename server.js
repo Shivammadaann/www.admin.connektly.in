@@ -1,25 +1,15 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const require = createRequire(import.meta.url);
 const serverEntry = path.join(__dirname, 'server.ts');
 const clientIndex = path.join(__dirname, 'dist', 'index.html');
-let tsxCli;
 
 if (!existsSync(serverEntry)) {
   console.error(`Missing server entry file: ${serverEntry}`);
-  process.exit(1);
-}
-
-try {
-  tsxCli = require.resolve('tsx/cli');
-} catch {
-  console.error('Missing local tsx package. Run npm install before starting the server.');
   process.exit(1);
 }
 
@@ -45,8 +35,9 @@ if (!existsSync(clientIndex)) {
   }
 }
 
-// Hostinger requires a .js startup file, while the app server remains authored in TypeScript.
-const server = spawn(process.execPath, [tsxCli, serverEntry], {
+// Hostinger requires a .js startup file. Node 22 strips erasable TypeScript
+// syntax natively, avoiding tsx/esbuild in the restricted production runtime.
+const server = spawn(process.execPath, ['--experimental-strip-types', serverEntry], {
   cwd: __dirname,
   env: process.env,
   stdio: 'inherit',
