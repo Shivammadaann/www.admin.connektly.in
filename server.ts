@@ -91,7 +91,7 @@ type ClientFeatureKey =
   | 'notifications';
 
 const app = express();
-const port = Number(process.env.PORT || 8787);
+const port = Number(process.env.PORT || process.env.API_PORT || 3000);
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';

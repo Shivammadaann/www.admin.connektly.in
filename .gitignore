@@ -7,4 +7,3 @@ server.err.log
 dev.out.log
 dev.err.log
 dev.codex*.log
-server.runtime.js
