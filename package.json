@@ -8,8 +8,10 @@
     "dev": "concurrently \"npm run dev:api\" \"npm run dev:client\"",
     "dev:client": "vite --port=3004 --host=0.0.0.0",
     "dev:api": "tsx server.ts",
-    "build": "vite build",
-    "postinstall": "vite build",
+    "build:client": "vite build",
+    "build:server": "node scripts/build-server.mjs",
+    "build": "npm run build:client && npm run build:server",
+    "postinstall": "npm run build",
     "preview": "vite preview --port=3004 --host=0.0.0.0",
     "start": "node server.js",
     "lint": "tsc --noEmit"
