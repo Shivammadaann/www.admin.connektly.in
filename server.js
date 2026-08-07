@@ -5,7 +5,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const serverEntry = path.join(__dirname, 'server.ts');
+const serverEntry = path.join(__dirname, 'server.runtime.js');
 const clientIndex = path.join(__dirname, 'dist', 'index.html');
 
 if (!existsSync(serverEntry)) {
@@ -35,9 +35,9 @@ if (!existsSync(clientIndex)) {
   }
 }
 
-// Hostinger requires a .js startup file. Node 22 strips erasable TypeScript
-// syntax natively, avoiding tsx/esbuild in the restricted production runtime.
-const server = spawn(process.execPath, ['--experimental-strip-types', serverEntry], {
+// Hostinger requires a .js startup file. The TypeScript server is transpiled
+// during installation so production startup never invokes tsx or esbuild.
+const server = spawn(process.execPath, [serverEntry], {
   cwd: __dirname,
   env: process.env,
   stdio: 'inherit',
